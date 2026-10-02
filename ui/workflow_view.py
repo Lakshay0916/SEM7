@@ -11,28 +11,29 @@ import difflib
 import pandas as pd
 import streamlit as st
 
-from app.ci.quality_gate import evaluate_gate
-from app.healing.loop import abort, apply_and_verify, decide, propose_fix, repair_branch
-from app.healing.rules import RuleBasedStrategy
 from app.models.schemas import PipelineRun, TestStatus
 from app.models.schemas import WorkflowState as S
-from ui.common import RISK_BADGE, TEST_BADGE, get_predictor, get_store, try_ai_commit_to_main
+from ui.api_client import APIError, ApiClient, TraceView, get_api
+from ui.common import GATE_BADGE, RISK_BADGE, TEST_BADGE
 from ui.content import PROGRESS, STEPS, UPCOMING
 from ui.style import kv_tiles, progress_bar, risk_gauge, step_header, upcoming_cards
 
-GATE_BADGE = {"PASS": "✅ PASS", "REVIEW": "🟠 REVIEW", "BLOCK": "⛔ BLOCK"}
 
-
-def strategy() -> RuleBasedStrategy:
-    return RuleBasedStrategy()
+def _act(fn, *args) -> None:
+    """Call an API action; show a readable error instead of a traceback."""
+    try:
+        fn(*args)
+    except APIError as exc:
+        st.session_state["_api_error"] = exc.detail
+    st.rerun()
 
 
 # --------------------------------------------------------------------------- progress strip
 
 
-def _progress(store, wf_id: str, run: PipelineRun) -> None:
-    reached = {e["state"] for e in store.events(wf_id) if e["state"]}
-    state = store.get_workflow(wf_id)["state"]
+def _progress(tv: TraceView, run: PipelineRun) -> None:
+    reached = {e["state"] for e in tv.events() if e["state"]}
+    state = tv.state()
     failed = run.test_report.status != TestStatus.PASS
     items = []
     for key, label, status, marker in PROGRESS:
@@ -61,18 +62,18 @@ def _diff(original: str, replacement: str, path: str) -> str:
                                         fromfile=f"a/{path}", tofile=f"b/{path}"))
 
 
-def _by_attempt(store, wf_id: str, kind: str) -> dict[int, dict]:
-    return {a["attempt"]: a["payload"] for a in store.artifacts(wf_id, kind)}
+def _by_attempt(tv: TraceView, kind: str) -> dict[int, dict]:
+    return {a["attempt"]: a["payload"] for a in tv.artifacts(kind)}
 
 
-def _attempt_block(store, wf_id: str, n: int) -> None:
-    inv = _by_attempt(store, wf_id, "investigation").get(n)
-    rc = _by_attempt(store, wf_id, "root_cause").get(n)
-    plan = _by_attempt(store, wf_id, "repair_plan").get(n)
-    approval = _by_attempt(store, wf_id, "approval").get(n)
-    attempt = _by_attempt(store, wf_id, "repair_attempt").get(n)
-    test = _by_attempt(store, wf_id, "test_run").get(n)
-    refl = _by_attempt(store, wf_id, "reflection").get(n)
+def _attempt_block(tv: TraceView, n: int) -> None:
+    inv = _by_attempt(tv, "investigation").get(n)
+    rc = _by_attempt(tv, "root_cause").get(n)
+    plan = _by_attempt(tv, "repair_plan").get(n)
+    approval = _by_attempt(tv, "approval").get(n)
+    attempt = _by_attempt(tv, "repair_attempt").get(n)
+    test = _by_attempt(tv, "test_run").get(n)
+    refl = _by_attempt(tv, "reflection").get(n)
 
     with st.container(border=True, key=f"attempt-{n}"):
         st.markdown(f"##### 🔁 Attempt {n}" + (f" · `{plan['level']}`" if plan else ""))
@@ -125,10 +126,9 @@ def _attempt_block(store, wf_id: str, n: int) -> None:
                        if refl["regressions"] else ""))
 
 
-def _healing(store, wf_id: str) -> None:
-    wf = store.get_workflow(wf_id)
-    state = S(wf["state"])
-    attempts = sorted(_by_attempt(store, wf_id, "investigation"))
+def _healing(api: ApiClient, tv: TraceView, wf_id: str) -> None:
+    state = S(tv.state())
+    attempts = sorted(_by_attempt(tv, "investigation"))
     status, label = {
         S.PR_CREATED: ("done", "✓ Repaired · PR opened"),
         S.ABORTED: ("fail", "✗ Stopped - human needed"),
@@ -144,47 +144,41 @@ def _healing(store, wf_id: str) -> None:
         if state == S.FAILED and not attempts:
             st.write("No analysis yet for this failure.")
             if st.button("🩺 Investigate & propose a fix", type="primary", key=f"start-{wf_id}"):
-                propose_fix(store, wf_id, strategy())
-                st.rerun()
+                _act(api.propose, wf_id)
 
         for n in attempts:
-            _attempt_block(store, wf_id, n)
+            _attempt_block(tv, n)
 
         if state == S.WAITING_APPROVAL:
             with st.container(border=True, key="approval-box"):
                 st.markdown("#### ⏸ Your decision")
                 st.write("Nothing has been changed yet. Approving applies **only** the diff above, on branch "
-                         f"`{repair_branch(wf_id)}` (never `main`), then re-runs the full test suite.")
+                         f"`ai/repair/{wf_id}` (never `main`), then re-runs the full test suite.")
                 c1, c2 = st.columns([1, 2])
                 reviewer = c1.text_input("Reviewer name", value="reviewer", key=f"rev-{wf_id}")
                 comment = c2.text_input("Comment (optional)", key=f"com-{wf_id}")
                 b1, b2, _ = st.columns([1, 1, 2])
                 if b1.button("✅ Approve & apply", type="primary", key=f"approve-{wf_id}", width="stretch"):
-                    decide(store, wf_id, True, reviewer or "reviewer", comment)
-                    with st.spinner("Applying on the repair branch and running the real tests…"):
-                        apply_and_verify(store, wf_id, strategy=strategy())
-                    st.rerun()
+                    with st.spinner("Backend is applying the fix on the repair branch and running the real tests…"):
+                        _act(api.approve, wf_id, reviewer or "reviewer", comment)
                 if b2.button("🚫 Reject", key=f"reject-{wf_id}", width="stretch"):
-                    decide(store, wf_id, False, reviewer or "reviewer", comment)
-                    st.rerun()
+                    _act(api.reject, wf_id, reviewer or "reviewer", comment)
         elif state == S.REJECTED:
             st.warning("You rejected the proposed fix. No code was changed.")
             b1, b2, _ = st.columns([1, 1, 2])
             if b1.button("🔁 Re-analyse", key=f"reanalyse-{wf_id}", width="stretch"):
-                propose_fix(store, wf_id, strategy())
-                st.rerun()
+                _act(api.propose, wf_id)
             if b2.button("⏹ Stop here", key=f"abort-{wf_id}", width="stretch"):
-                abort(store, wf_id, "Stopped by reviewer after rejection")
-                st.rerun()
+                _act(api.abort, wf_id, "Stopped by reviewer after rejection")
         elif state == S.PR_CREATED:
-            pr = store.latest(wf_id, "pull_request")
+            pr = tv.latest("pull_request")
             st.success(f"🎉 Fix validated by real tests. Pull request opened ({pr['provider']}, **not merged**): "
                        f"`{pr['head_branch']}` → `{pr['base_branch']}`")
             with st.expander("📄 Pull request description"):
                 st.markdown(pr["body"])
             st.caption(f"Saved at `{pr['url']}`")
         elif state == S.ABORTED:
-            last = [e for e in store.events(wf_id) if e["state"] == "ABORTED"]
+            last = [e for e in tv.events() if e["state"] == "ABORTED"]
             st.error(f"⏹ {last[-1]['message'] if last else 'Workflow stopped.'}")
 
 
@@ -192,9 +186,16 @@ def _healing(store, wf_id: str) -> None:
 
 
 def render_workflow(wf_id: str) -> None:
-    store = get_store()
-    wf = store.get_workflow(wf_id)
-    payload = store.latest(wf_id, "pipeline_run")
+    api = get_api()
+    if err := st.session_state.pop("_api_error", None):
+        st.error(f"The backend refused that action: {err}")
+    try:
+        tv = TraceView(api.trace(wf_id))
+    except APIError as exc:
+        st.error(f"Could not load workflow `{wf_id}`: {exc.detail}")
+        return
+    wf = tv.get_workflow()
+    payload = tv.latest("pipeline_run")
     if payload is None:
         st.warning("This workflow has no recorded pipeline run.")
         return
@@ -203,7 +204,7 @@ def render_workflow(wf_id: str) -> None:
 
     st.markdown(f"### Workflow `{wf_id}`")
     st.caption(f"Scenario `{wf['scenario']}` · final state **{wf['state']}** · sandbox `{wf['repo_path']}`")
-    _progress(store, wf_id, run)
+    _progress(tv, run)
 
     # 1. Sandbox + commit ------------------------------------------------------
     with st.container(border=True, key="step-done-1"):
@@ -247,10 +248,10 @@ def render_workflow(wf_id: str) -> None:
             step_header(3, s["title"], risk_status, RISK_BADGE[r.risk_level.value], s["what"], s["why"])
             left, right = st.columns([3, 2])
             with left:
-                predictor = get_predictor()
+                model = api.risk_model()
                 variant = r.model_version.split(":")[1]
-                if predictor is not None and variant in predictor.bundle["variants"]:
-                    lv = predictor.bundle["variants"][variant]["risk_levels"]
+                if model is not None and variant in model["variants"]:
+                    lv = model["variants"][variant]["risk_levels"]
                     risk_gauge(r.risk_score, lv["medium"], lv["high"])
                     st.caption(
                         "Bands come from the validation set: MEDIUM = above the median score, "
@@ -269,7 +270,7 @@ def render_workflow(wf_id: str) -> None:
 
     # 4. Tests + quality gate --------------------------------------------------------
     t = run.test_report
-    gate = evaluate_gate(t, r)
+    gate = tv.latest("quality_gate")
     st_status = "done" if t.status == TestStatus.PASS else "fail"
     with st.container(border=True, key=f"step-{st_status}-4"):
         s = STEPS["tests"]
@@ -279,10 +280,10 @@ def render_workflow(wf_id: str) -> None:
         cols[1].metric("Tests run", t.tests_run)
         cols[2].metric("Passed", t.tests_passed)
         cols[3].metric("Failed", t.tests_failed)
-        cols[4].metric("Quality gate", GATE_BADGE[gate.status.value],
+        cols[4].metric("Quality gate", GATE_BADGE[gate["status"]] if gate else "n/a",
                        help="Tests always run. FAIL → BLOCK; tests pass + HIGH risk → REVIEW; else PASS")
         st.caption(f"Command `{t.command}` · pytest exit code `{t.exit_code}` · {t.duration_seconds:.2f}s · "
-                   f"gate: {gate.reasons[0]}")
+                   f"gate: {gate['reasons'][0] if gate else 'not recorded'}")
         for n in t.notes:
             st.warning(n)
         for f in t.failures:
@@ -308,20 +309,20 @@ def render_workflow(wf_id: str) -> None:
 
     # 6. Self-healing -------------------------------------------------------------
     if failed:
-        _healing(store, wf_id)
+        _healing(api, tv, wf_id)
 
     # 7. Recorded -------------------------------------------------------------------
     with st.container(border=True, key="step-done-7"):
         s = STEPS["record"]
-        step_header(7 if failed else 6, s["title"], "done", f"✓ Recorded · {len(store.events(wf_id))} events",
+        step_header(7 if failed else 6, s["title"], "done", f"✓ Recorded · {len(tv.events())} events",
                     s["what"], s["why"])
-        ev = pd.DataFrame(store.events(wf_id))
+        ev = pd.DataFrame(tv.events())
         ev["ts"] = ev["ts"].str[11:19]
         ev["state"] = ev["state"].fillna("(log only)")
         st.dataframe(ev[["ts", "state", "agent", "status", "message"]].rename(columns={"ts": "time (UTC)"}),
                      hide_index=True, width="stretch")
         with st.expander("Stored artifacts (raw JSON)"):
-            for a in store.artifacts(wf_id):
+            for a in tv.artifacts():
                 st.markdown(f"**{a['kind']}** (attempt {a['attempt']}) · {a['created_at'][:19]}")
                 st.json(a["payload"], expanded=False)
 
@@ -332,7 +333,13 @@ def render_workflow(wf_id: str) -> None:
                  "must refuse it and `main` must stay unchanged. Repairs are only ever allowed on "
                  "`ai/repair/*` branches.")
         if st.button("Attempt AI commit to main", key=f"guard-{wf_id}"):
-            st.code(try_ai_commit_to_main(wf["repo_path"]), language="text")
+            try:
+                res = api.safety_check(wf_id)
+                verdict = f"✅ Blocked - {res['message']}" if res["blocked"] else "❗ UNEXPECTED: commit succeeded"
+                st.code(f"{verdict}\nmain unchanged: {res['main_unchanged']} (still at {res['main_sha'][:10]})",
+                        language="text")
+            except APIError as exc:
+                st.error(exc.detail)
 
     st.markdown("#### Roadmap")
     st.caption("Still to come. The Agentic AI items plug into the same loop shown above.")

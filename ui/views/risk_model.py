@@ -1,7 +1,8 @@
 import pandas as pd
 import streamlit as st
 
-from ui.common import RISK_DIR, hbar, load_json
+from ui.api_client import get_api, require_api
+from ui.common import hbar
 from ui.content import GLOSSARY
 from ui.style import hero
 
@@ -22,7 +23,9 @@ def _metric_rows(variant: dict) -> pd.DataFrame:
 
 def render() -> None:
     st.title("ML Risk Model")
-    evaluation, mining = load_json("evaluation.json"), load_json("mining_summary.json")
+    require_api()
+    data = get_api().risk_evaluation()
+    evaluation, mining = data["evaluation"], data["mining_summary"]
     if not evaluation:
         st.warning("No evaluation found. Run `python scripts/mine_ci_data.py` then `python scripts/train_risk_model.py`.")
         return
@@ -113,7 +116,6 @@ def render() -> None:
         for term, text in GLOSSARY.items():
             st.markdown(f"**{term}** — {text}")
 
-    md_path = RISK_DIR / "EVALUATION.md"
-    if md_path.exists() and "## Caveats" in (text := md_path.read_text()):
+    if data["caveats"]:
         with st.expander("⚠️ Caveats and limitations"):
-            st.markdown(text.split("## Caveats", 1)[1])
+            st.markdown(data["caveats"])

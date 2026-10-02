@@ -64,6 +64,7 @@ def run_ci_workflow(
         duration_ms=int(report.duration_seconds * 1000),
     )
     gate = evaluate_gate(report, run.risk)
+    store.save_artifact(wf, "quality_gate", gate)
     store.log_event(wf, "quality_gate", gate.status.value.lower(), f"Quality gate {gate.status.value}: "
                     + "; ".join(gate.reasons[:2]))
     if run.failure_event is None:

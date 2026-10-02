@@ -1,0 +1,14 @@
+# Backend API container: pipeline, risk model, self-healing loop, database access.
+pydantic>=2.6
+python-dotenv>=1.0
+pytest>=8            # runtime dependency: the pipeline really runs test suites
+numpy>=1.26
+pandas>=2.1
+scipy>=1.11
+scikit-learn>=1.4
+joblib>=1.3
+fastapi>=0.115
+uvicorn[standard]>=0.30
+sqlalchemy>=2.0
+psycopg[binary]>=3.2
+httpx>=0.27          # FastAPI TestClient in tests

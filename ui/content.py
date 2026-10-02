@@ -65,7 +65,8 @@ STEPS = {
         "title": "Workflow recorded",
         "what": (
             "Each stage moved the workflow through a state machine (RECEIVED → RISK_ANALYZED → TESTING → "
-            "FAILED → … → PR_CREATED) and every output and human decision was saved to SQLite with a timestamp."
+            "FAILED → … → PR_CREATED) and every output and human decision was saved to the database "
+            "(PostgreSQL in Docker) with a timestamp."
         ),
         "why": (
             "Full traceability: anyone can audit commit → risk → tests → failure → plan → approval → repair → "

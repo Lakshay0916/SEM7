@@ -1,31 +1,86 @@
-# docker compose up                       -> dashboard on http://localhost:8502
-# docker compose run --rm tests           -> run the test suite in the container
-# docker compose run --rm cli python scripts/run_ci.py --scenario failed_first_repair --heal --approve
+# Three services: ui → api → db (each waits for the next to be healthy).
+#
+#   docker compose up --build                         UI http://localhost:8502 · API http://localhost:8000/docs
+#   (ports busy? API_PORT=8010 UI_PORT=8512 docker compose up)
+#   docker compose --profile tools run --rm tests     test suite in the API image (store tests also on Postgres)
+#   docker compose --profile tools run --rm cli python scripts/run_ci.py --scenario failed_first_repair --heal --approve
+#   docker compose down            (add -v to also delete the database and workspaces)
+
+x-db-env: &db-url
+  DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-sem7}:${POSTGRES_PASSWORD:-sem7dev}@db:5432/${POSTGRES_DB:-sem7}
+
 services:
-  dashboard:
-    build: .
-    image: sem7-selfheal:latest
-    ports:
-      - "8502:8502"
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sem7}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sem7dev}
+      POSTGRES_DB: ${POSTGRES_DB:-sem7}
     volumes:
-      - workspace:/app/workspace   # sandboxes + SQLite workflow store survive restarts
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    image: sem7-api:latest
     env_file:
       - path: .env
         required: false
+    environment:
+      <<: *db-url
+    volumes:
+      - workspace:/app/workspace   # sandbox repos and repair branches
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ui:
+    build:
+      context: .
+      dockerfile: docker/ui.Dockerfile
+    image: sem7-ui:latest
+    environment:
+      SEM7_API_URL: http://api:8000
+    ports:
+      - "${UI_PORT:-8502}:8502"
+    depends_on:
+      api:
+        condition: service_healthy
     restart: unless-stopped
 
   tests:
-    image: sem7-selfheal:latest
+    image: sem7-api:latest
     profiles: ["tools"]
-    command: ["python", "-m", "pytest", "-q"]
+    environment:
+      <<: *db-url
+      TEST_POSTGRES_URL: postgresql+psycopg://${POSTGRES_USER:-sem7}:${POSTGRES_PASSWORD:-sem7dev}@db:5432/${POSTGRES_DB:-sem7}
+    command: ["python", "-m", "pytest", "-p", "no:cacheprovider", "--ignore=tests/test_ui.py"]
+    depends_on:
+      db:
+        condition: service_healthy
 
   cli:
-    image: sem7-selfheal:latest
+    image: sem7-api:latest
     profiles: ["tools"]
+    environment:
+      <<: *db-url
     volumes:
       - workspace:/app/workspace
-    entrypoint: []
     command: ["python", "scripts/run_ci.py", "--list"]
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
+  pgdata:
   workspace:

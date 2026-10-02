@@ -36,6 +36,15 @@ AGENTS = "digraph B {" + _STYLE.replace("rankdir=LR", "rankdir=TB; newrank=true"
 }"""
 
 
+DEPLOY = "digraph D {" + _STYLE + """
+  user [label="You\\n(browser)", shape=oval, fillcolor="#e6f5e6", color="#9fd59f"];
+  ui [label="ui container\\nStreamlit · :8502\\n(thin client)"];
+  api [label="api container\\nFastAPI · :8000\\npipeline · risk · self-healing · git"];
+  db [label="db container\\nPostgreSQL 16\\nworkflows · events · artifacts", shape=cylinder];
+  ws [label="workspace volume\\nsandbox repos", shape=folder, fillcolor="#fafbfc", color="#b4bcc9"];
+  user -> ui [label="HTTP"]; ui -> api [label="REST / JSON"]; api -> db [label="SQL"]; api -> ws;
+}"""
+
 _DARK = {  # light-diagram color -> dark-diagram color
     "#eaf2fc": "#1a2a42", "#9fbfe6": "#3d6aa8", "#1d2433": "#e6eaf0",
     "#e6f5e6": "#173524", "#9fd59f": "#2f8a52", "#fdeaea": "#3d1d22", "#ec9a9a": "#b54a4a",
@@ -85,13 +94,24 @@ def render() -> None:
         "| LLM agents | Reason over evidence, propose richer fixes | Same interface, gate and tests | ⏳ Agentic AI |"
     )
 
+    st.markdown("#### Deployment: three containers")
+    st.graphviz_chart(_themed(DEPLOY), width="stretch")
+    st.markdown(
+        "- **ui** — Streamlit. Contains no pipeline code: every read and every button is an HTTP call to the API.\n"
+        "- **api** — FastAPI. Runs the pipeline, risk model and self-healing loop (and `git` / `pytest`). "
+        "Interactive docs at `/docs`.\n"
+        "- **db** — PostgreSQL. Stores every workflow, event and artifact; not exposed outside the Docker network.\n"
+        "- Start-up order is enforced by health checks: db healthy → api healthy → ui. Data lives in named volumes."
+    )
+
     st.markdown("#### DevOps: how it runs in CI")
     st.markdown(
         "- **GitHub Actions** (`.github/workflows/ci.yml`) runs on every push and pull request: the full test "
-        "suite on Linux and Windows, the **risk-aware quality gate** (`scripts/ci_gate.py`), and a Docker build.\n"
+        "suite on Linux and Windows, the **risk-aware quality gate** (`scripts/ci_gate.py`), and the full 3-container stack with an end-to-end self-healing run.\n"
         "- **Quality gate:** tests always run. Failing tests → **BLOCK** (red check); passing tests but HIGH risk → "
         "**REVIEW** (warning annotation); otherwise **PASS**. The gate's report appears in the run summary.\n"
-        "- **Docker:** `docker compose up` starts this dashboard with the same Python environment everywhere.\n"
+        "- **Docker:** `docker compose up` starts all three containers; CI starts the same stack and runs an "
+        "end-to-end check through the API.\n"
         "- **Reports:** `scripts/export_report.py` exports any workflow as Markdown."
     )
 

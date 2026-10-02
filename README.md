@@ -21,22 +21,50 @@ One codebase serves two tracks:
 ```bash
 conda create -n SEM7 python=3.11 -y
 conda activate SEM7
-pip install -r requirements.txt
+pip install -r requirements.txt   # = requirements-api.txt + requirements-ui.txt
 cp .env.example .env   # optional; defaults work offline
 ```
 
-Or with Docker (no local Python needed):
+Or with Docker — three containers, no local Python needed:
 
 ```bash
-docker compose up                                # dashboard at http://localhost:8502
-docker compose --profile tools run --rm tests    # test suite inside the container
+docker compose up --build        # UI http://localhost:8502 · API http://localhost:8000/docs
+# ports busy?  API_PORT=8010 UI_PORT=8512 docker compose up --build
+docker compose --profile tools run --rm tests      # test suite in the api image (store tests on PostgreSQL)
 docker compose --profile tools run --rm cli python scripts/run_ci.py --scenario failed_first_repair --heal --approve
+python scripts/e2e_api.py --url http://localhost:8000 --expect-db postgresql   # end-to-end check of the stack
+docker compose down              # add -v to delete the database and workspaces
+```
+
+## Architecture (containers)
+
+```
+browser ──HTTP──▶ ui (Streamlit :8502) ──REST/JSON──▶ api (FastAPI :8000) ──SQL──▶ db (PostgreSQL 16)
+                  thin client, no pipeline code       pipeline · risk · self-healing       workflows · events · artifacts
+                                                      git + pytest · workspace volume      pgdata volume (internal only)
+```
+
+| Container | Image | Role |
+|---|---|---|
+| `ui` | `docker/ui.Dockerfile` (`requirements-ui.txt`) | Streamlit dashboard; every read/click is an API call (`ui/api_client.py`) |
+| `api` | `docker/api.Dockerfile` (`requirements-api.txt`) | FastAPI (`app/api/main.py`): runs pipelines, the risk model and the self-healing loop |
+| `db` | `postgres:16-alpine` | Persistent store; reachable only inside the Docker network |
+
+Start-up order is enforced by health checks (db → api → ui). Configuration comes from `.env`
+(see `.env.example`: Postgres credentials, ports). Locally without Docker the store falls back to SQLite.
+
+**Run without Docker** (two terminals):
+
+```bash
+uvicorn app.api.main:app --port 8000     # backend (SQLite by default)
+streamlit run ui/app.py                  # UI (talks to SEM7_API_URL, default http://localhost:8000)
 ```
 
 ## Run
 
 ```bash
-streamlit run ui/app.py                          # dashboard at http://localhost:8502
+uvicorn app.api.main:app --port 8000             # backend API (docs at /docs)
+streamlit run ui/app.py                          # dashboard at http://localhost:8502 (needs the API)
 python scripts/run_ci.py --list                  # available demo scenarios
 python scripts/run_ci.py --scenario simple_bug   # sandbox -> commit -> diff -> risk -> real tests -> FailureEvent
 python scripts/run_ci.py --scenario failed_first_repair --heal            # propose a fix, stop for approval
@@ -66,7 +94,7 @@ healthy `main` and a feature branch carrying the scenario's buggy commit.
 | 6 | RAG retrieval | todo (Agentic AI) |
 | 8–11 | Human approval, repair on `ai/repair/*`, real re-test, bounded reflection | done |
 | 12 | PR adapter | done — local adapter (GitHub adapter todo) |
-| IDT | Quality gate, Docker, GitHub Actions (Linux + Windows), Markdown reports | done |
+| IDT | Quality gate, 3-container Docker stack (ui + api + PostgreSQL), GitHub Actions (Linux + Windows + compose e2e), Markdown reports | done |
 
 ## DevOps / IDT pipeline
 
@@ -74,9 +102,9 @@ healthy `main` and a feature branch carrying the scenario's buggy commit.
 
 | Job | What it does |
 |---|---|
-| Quality gate (Linux) | `scripts/ci_gate.py`: diff vs. base → ML risk score → **full test suite** → gate. Report in the run summary, JSON artifact. |
+| Quality gate (Linux) | `scripts/ci_gate.py`: diff vs. base → ML risk score → **full test suite** (store tests also on a PostgreSQL service) → gate. Report in the run summary, JSON artifact. |
 | Tests (Windows) | Full suite on Windows (cross-platform paths, encodings, line endings). |
-| Docker | Builds the image, runs the tests inside it, smoke-tests the dashboard's health endpoint. |
+| 3-container stack | `docker compose up --wait` (ui + api + PostgreSQL), end-to-end self-healing run through the API, tests inside the api image. |
 | Self-healing demo | Scenario 3 end to end (fix 1 fails → reflection → fix 2 → PR); uploads the report and PR description. |
 
 **Gate policy** (`app/ci/quality_gate.py`) — tests always run; risk can only add scrutiny:
@@ -157,8 +185,11 @@ app/
 demo_projects/calculator/   controlled demo target
 ui/                         Streamlit dashboard (app.py + views/)
 scripts/                    run_ci.py, ci_gate.py, export_report.py, mine_ci_data.py, train_risk_model.py
+app/api/main.py             FastAPI backend
+ui/api_client.py            UI → API HTTP client
+docker/                     api.Dockerfile, ui.Dockerfile
+docker-compose.yml          ui + api + db (PostgreSQL)
 .github/workflows/ci.yml    GitHub Actions pipeline
-Dockerfile, docker-compose.yml
 data/risk/                  repos.json, mined runs/rows, commits.csv, evaluation
 models/risk_model.joblib    trained risk model
 tests/                      unit + safety tests

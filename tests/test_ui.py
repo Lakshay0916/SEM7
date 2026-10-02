@@ -17,12 +17,13 @@ def _page(module: str) -> AppTest:
 
 
 @pytest.fixture(autouse=True)
-def isolated_db(tmp_path, monkeypatch):
-    """Point the UI's Store at a throwaway database and sandbox workspace."""
+def isolated_backend(tmp_path, monkeypatch):
+    """UI talks to the real FastAPI app in-process, backed by a throwaway database and workspace."""
     from dataclasses import replace
 
     import streamlit as st
 
+    import app.api.main as api
     import app.ci.simulator as sim_mod
     import app.orchestration.store as store_mod
 
@@ -30,8 +31,11 @@ def isolated_db(tmp_path, monkeypatch):
                       workspace_dir=tmp_path / "ws")
     monkeypatch.setattr(store_mod, "settings", patched)
     monkeypatch.setattr(sim_mod, "settings", patched)
+    monkeypatch.setenv("SEM7_API_INPROCESS", "1")
+    api.get_store.cache_clear()
     st.cache_resource.clear()
     yield
+    api.get_store.cache_clear()
     st.cache_resource.clear()
 
 
@@ -77,3 +81,14 @@ def test_workflow_history_replays_a_run():
     hist = _page("ui.views.workflows").run()
     assert not hist.exception, hist.exception
     assert "final state **PASSED**" in " ".join(c.value for c in hist.caption)
+
+
+def test_ui_reports_unreachable_backend(monkeypatch):
+    import streamlit as st
+
+    monkeypatch.delenv("SEM7_API_INPROCESS")
+    monkeypatch.setenv("SEM7_API_URL", "http://127.0.0.1:9")  # nothing listens here
+    st.cache_resource.clear()
+    at = _page("ui.views.dashboard").run()
+    assert not at.exception
+    assert any("Backend API unavailable" in e.value for e in at.error)

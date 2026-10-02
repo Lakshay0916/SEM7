@@ -1,4 +1,5 @@
 import logging
+import os
 
 import pytest
 
@@ -10,9 +11,17 @@ from app.orchestration.state import InvalidTransition, check_transition
 from app.orchestration.store import Store
 
 
-@pytest.fixture
-def store(tmp_path):
-    return Store(f"sqlite:///{tmp_path / 'test.sqlite3'}")
+POSTGRES_URL = os.getenv("TEST_POSTGRES_URL")  # set in CI (service container) or locally
+
+
+@pytest.fixture(params=["sqlite", "postgresql"])
+def store(request, tmp_path):
+    """Every store test runs on SQLite, and on PostgreSQL when TEST_POSTGRES_URL is set."""
+    if request.param == "sqlite":
+        return Store(f"sqlite:///{tmp_path / 'test.sqlite3'}")
+    if not POSTGRES_URL:
+        pytest.skip("TEST_POSTGRES_URL not set")
+    return Store(POSTGRES_URL)
 
 
 HAPPY_PATH = [S.RISK_ANALYZED, S.TESTING, S.FAILED, S.INVESTIGATING, S.ROOT_CAUSE_IDENTIFIED,
@@ -85,7 +94,7 @@ def test_run_ci_workflow_records_trace(store, tmp_path):
     res = run_ci_workflow("simple_bug", store, predictor=None, workspace=tmp_path)
     assert store.state(res.workflow_id) == S.FAILED
     kinds = [a["kind"] for a in store.artifacts(res.workflow_id)]
-    assert kinds == ["pipeline_run", "failure_event"]
+    assert kinds == ["pipeline_run", "quality_gate", "failure_event"]
     states = [e["state"] for e in store.events(res.workflow_id) if e["state"]]
     assert states == ["RECEIVED", "TESTING", "FAILED"]
 

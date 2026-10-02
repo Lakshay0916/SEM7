@@ -1,7 +1,7 @@
 import pandas as pd
 import streamlit as st
 
-from ui.common import get_predictor, get_store, load_json
+from ui.api_client import get_api, require_api
 from ui.content import PROGRESS
 from ui.style import hero, tiles
 
@@ -27,10 +27,10 @@ def render() -> None:
                "🚦 Risk-aware quality gate", "🐳 Docker + GitHub Actions"],
     )
 
-    store = get_store()
-    wfs = store.list_workflows(limit=500)
-    predictor = get_predictor()
-    evaluation = load_json("evaluation.json")
+    health = require_api()
+    api = get_api()
+    wfs = api.workflows(limit=500)
+    evaluation = api.risk_evaluation()["evaluation"]
 
     cols = st.columns(4)
     cols[0].metric("Workflows run", len(wfs), help="Each click of 'Run' on the Run Pipeline page")
@@ -92,4 +92,4 @@ def render() -> None:
             ]),
             hide_index=True, width="stretch", height=300,
         )
-        st.caption(f"Risk model version `{predictor.version}`" if predictor else "Risk model not trained.")
+        st.caption(f"Backend: API ✅ · database `{health['database']}` · risk model `{health['risk_model']}`")

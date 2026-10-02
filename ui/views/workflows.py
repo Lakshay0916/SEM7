@@ -1,18 +1,18 @@
 import pandas as pd
 import streamlit as st
 
-from ui.common import get_store
+from ui.api_client import get_api, require_api
 from ui.workflow_view import render_workflow
 
 
 def render() -> None:
     st.title("Workflow History")
     st.write(
-        "Every run is saved in a SQLite database (`workspace/sem7.sqlite3`): each state change, which "
-        "component did it, and every output it produced. Pick any past run to replay its step-by-step report."
+        "Every run is saved by the backend in its database (PostgreSQL in Docker, SQLite locally): each state "
+        "change, which component did it, and every output it produced. Pick any past run to replay its report."
     )
-    store = get_store()
-    wfs = store.list_workflows(limit=500)
+    require_api()
+    wfs = get_api().workflows(limit=500)
     if not wfs:
         st.info("No workflows yet - run one from **Run Pipeline**.")
         return

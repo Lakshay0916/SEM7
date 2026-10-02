@@ -1,4 +1,7 @@
-"""SQLite persistence for workflows, stage events and stage artifacts.
+"""Persistence for workflows, stage events and stage artifacts (SQLAlchemy Core).
+
+Works with PostgreSQL (the Docker deployment) and SQLite (local development
+and fast tests); the backend is chosen by DATABASE_URL.
 
 * workflows - one row per debugging workflow (current state, attempt counter)
 * events    - append-only log of state transitions / agent activity
@@ -10,82 +13,120 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import uuid
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from pydantic import BaseModel
+from sqlalchemy import (
+    Column,
+    Engine,
+    ForeignKey,
+    Index,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    Text,
+    create_engine,
+    insert,
+    select,
+    update,
+)
 
 from app.config import PROJECT_ROOT, settings
 from app.models.schemas import WorkflowState, utcnow
 from app.orchestration.state import check_transition
 
 ARTIFACT_KINDS = {
-    "risk_assessment", "pipeline_run", "failure_event", "investigation", "rag_retrieval",
+    "risk_assessment", "pipeline_run", "failure_event", "quality_gate", "investigation", "rag_retrieval",
     "root_cause", "repair_plan", "approval", "repair_attempt", "test_run", "reflection",
     "pull_request",
 }
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS workflows (
-    id TEXT PRIMARY KEY,
-    scenario TEXT,
-    repo_path TEXT NOT NULL,
-    commit_sha TEXT,
-    branch TEXT,
-    state TEXT NOT NULL,
-    attempt INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    workflow_id TEXT NOT NULL REFERENCES workflows(id),
-    ts TEXT NOT NULL,
-    state TEXT,
-    agent TEXT,
-    status TEXT,
-    message TEXT,
-    duration_ms INTEGER
-);
-CREATE TABLE IF NOT EXISTS artifacts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    workflow_id TEXT NOT NULL REFERENCES workflows(id),
-    kind TEXT NOT NULL,
-    attempt INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL,
-    payload TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_events_wf ON events(workflow_id);
-CREATE INDEX IF NOT EXISTS idx_artifacts_wf ON artifacts(workflow_id, kind);
-"""
+metadata = MetaData()
+
+workflows = Table(
+    "workflows", metadata,
+    Column("id", String(32), primary_key=True),
+    Column("scenario", String(64)),
+    Column("repo_path", Text, nullable=False),
+    Column("commit_sha", String(64)),
+    Column("branch", String(255)),
+    Column("state", String(32), nullable=False),
+    Column("attempt", Integer, nullable=False, default=0),
+    Column("created_at", String(40), nullable=False),
+    Column("updated_at", String(40), nullable=False),
+)
+
+events = Table(
+    "events", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("workflow_id", String(32), ForeignKey("workflows.id"), nullable=False),
+    Column("ts", String(40), nullable=False),
+    Column("state", String(32)),
+    Column("agent", String(64)),
+    Column("status", String(32)),
+    Column("message", Text),
+    Column("duration_ms", Integer),
+)
+
+artifacts = Table(
+    "artifacts", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("workflow_id", String(32), ForeignKey("workflows.id"), nullable=False),
+    Column("kind", String(32), nullable=False),
+    Column("attempt", Integer, nullable=False, default=0),
+    Column("created_at", String(40), nullable=False),
+    Column("payload", Text, nullable=False),
+)
+
+Index("idx_events_wf", events.c.workflow_id)
+Index("idx_artifacts_wf", artifacts.c.workflow_id, artifacts.c.kind)
+
+_ENGINES: dict[str, Engine] = {}
 
 
-def _db_path(url: str) -> Path:
-    if not url.startswith("sqlite:///"):
-        raise ValueError(f"only sqlite:/// URLs are supported, got {url!r}")
-    p = Path(url.removeprefix("sqlite:///"))
-    return p if p.is_absolute() else PROJECT_ROOT / p
+def normalise_url(url: str) -> str:
+    """Resolve relative sqlite paths against the project root; pass other URLs through."""
+    if url.startswith("sqlite:///"):
+        p = Path(url.removeprefix("sqlite:///"))
+        if not p.is_absolute():
+            p = PROJECT_ROOT / p
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return f"sqlite:///{p}"
+    if url.startswith("postgresql://"):  # default to the psycopg 3 driver
+        return "postgresql+psycopg://" + url.removeprefix("postgresql://")
+    if url.startswith(("postgresql+", "sqlite")):
+        return url
+    raise ValueError(f"unsupported DATABASE_URL scheme: {url.split(':', 1)[0]}")
+
+
+def _engine(url: str) -> Engine:
+    if url not in _ENGINES:
+        engine = create_engine(url, pool_pre_ping=True)
+        metadata.create_all(engine)
+        _ENGINES[url] = engine
+    return _ENGINES[url]
+
+
+def _row(r) -> dict:
+    return dict(r._mapping)
 
 
 class Store:
     def __init__(self, url: str | None = None) -> None:
-        self.path = _db_path(url or settings.database_url)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self._conn() as c:
-            c.executescript(SCHEMA)
+        self.url = normalise_url(url or settings.database_url)
+        self.engine = _engine(self.url)
 
-    @contextmanager
-    def _conn(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
-        try:
-            yield conn
-            conn.commit()
-        finally:
-            conn.close()
+    @property
+    def backend(self) -> str:
+        return self.engine.dialect.name  # "postgresql" | "sqlite"
+
+    def ping(self) -> bool:
+        with self.engine.connect() as c:
+            c.execute(select(1))
+        return True
 
     # -------------------------------------------------------------- workflows
 
@@ -93,27 +134,26 @@ class Store:
                         commit_sha: str | None = None, branch: str | None = None) -> str:
         wf_id = f"wf-{uuid.uuid4().hex[:10]}"
         now = utcnow().isoformat()
-        with self._conn() as c:
-            c.execute(
-                "INSERT INTO workflows VALUES (?,?,?,?,?,?,?,?,?)",
-                (wf_id, scenario, str(repo_path), commit_sha, branch,
-                 WorkflowState.RECEIVED.value, 0, now, now),
-            )
+        with self.engine.begin() as c:
+            c.execute(insert(workflows).values(
+                id=wf_id, scenario=scenario, repo_path=str(repo_path), commit_sha=commit_sha, branch=branch,
+                state=WorkflowState.RECEIVED.value, attempt=0, created_at=now, updated_at=now,
+            ))
         self.log_event(wf_id, "orchestrator", "ok", f"Commit {(commit_sha or '?')[:10]} received",
                        state=WorkflowState.RECEIVED)
         return wf_id
 
     def get_workflow(self, wf_id: str) -> dict:
-        with self._conn() as c:
-            row = c.execute("SELECT * FROM workflows WHERE id=?", (wf_id,)).fetchone()
+        with self.engine.connect() as c:
+            row = c.execute(select(workflows).where(workflows.c.id == wf_id)).first()
         if row is None:
             raise KeyError(f"unknown workflow {wf_id}")
-        return dict(row)
+        return _row(row)
 
     def list_workflows(self, limit: int = 50) -> list[dict]:
-        with self._conn() as c:
-            rows = c.execute("SELECT * FROM workflows ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
-        return [dict(r) for r in rows]
+        with self.engine.connect() as c:
+            rows = c.execute(select(workflows).order_by(workflows.c.created_at.desc()).limit(limit)).all()
+        return [_row(r) for r in rows]
 
     def state(self, wf_id: str) -> WorkflowState:
         return WorkflowState(self.get_workflow(wf_id)["state"])
@@ -121,32 +161,30 @@ class Store:
     def transition(self, wf_id: str, target: WorkflowState, message: str = "", agent: str = "orchestrator") -> None:
         current = self.state(wf_id)
         check_transition(current, target)
-        with self._conn() as c:
-            c.execute("UPDATE workflows SET state=?, updated_at=? WHERE id=?",
-                      (target.value, utcnow().isoformat(), wf_id))
+        with self.engine.begin() as c:
+            c.execute(update(workflows).where(workflows.c.id == wf_id)
+                      .values(state=target.value, updated_at=utcnow().isoformat()))
         self.log_event(wf_id, agent, "ok", message or f"{current.value} -> {target.value}", state=target)
 
     def set_attempt(self, wf_id: str, attempt: int) -> None:
-        with self._conn() as c:
-            c.execute("UPDATE workflows SET attempt=?, updated_at=? WHERE id=?",
-                      (attempt, utcnow().isoformat(), wf_id))
+        with self.engine.begin() as c:
+            c.execute(update(workflows).where(workflows.c.id == wf_id)
+                      .values(attempt=attempt, updated_at=utcnow().isoformat()))
 
     # ----------------------------------------------------------------- events
 
     def log_event(self, wf_id: str, agent: str, status: str, message: str,
                   state: WorkflowState | None = None, duration_ms: int | None = None) -> None:
-        with self._conn() as c:
-            c.execute(
-                "INSERT INTO events (workflow_id, ts, state, agent, status, message, duration_ms) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (wf_id, utcnow().isoformat(), state.value if state else None, agent, status,
-                 _redact(message), duration_ms),
-            )
+        with self.engine.begin() as c:
+            c.execute(insert(events).values(
+                workflow_id=wf_id, ts=utcnow().isoformat(), state=state.value if state else None,
+                agent=agent, status=status, message=_redact(message), duration_ms=duration_ms,
+            ))
 
     def events(self, wf_id: str) -> list[dict]:
-        with self._conn() as c:
-            rows = c.execute("SELECT * FROM events WHERE workflow_id=? ORDER BY id", (wf_id,)).fetchall()
-        return [dict(r) for r in rows]
+        with self.engine.connect() as c:
+            rows = c.execute(select(events).where(events.c.workflow_id == wf_id).order_by(events.c.id)).all()
+        return [_row(r) for r in rows]
 
     # -------------------------------------------------------------- artifacts
 
@@ -154,21 +192,20 @@ class Store:
         if kind not in ARTIFACT_KINDS:
             raise ValueError(f"unknown artifact kind {kind!r}")
         data = payload.model_dump_json() if isinstance(payload, BaseModel) else json.dumps(payload, default=str)
-        with self._conn() as c:
-            cur = c.execute(
-                "INSERT INTO artifacts (workflow_id, kind, attempt, created_at, payload) VALUES (?,?,?,?,?)",
-                (wf_id, kind, attempt, utcnow().isoformat(), _redact(data)),
-            )
-            return int(cur.lastrowid)
+        with self.engine.begin() as c:
+            res = c.execute(insert(artifacts).values(
+                workflow_id=wf_id, kind=kind, attempt=attempt, created_at=utcnow().isoformat(),
+                payload=_redact(data),
+            ))
+            return int(res.inserted_primary_key[0])
 
     def artifacts(self, wf_id: str, kind: str | None = None) -> list[dict]:
-        q, args = "SELECT * FROM artifacts WHERE workflow_id=?", [wf_id]
+        q = select(artifacts).where(artifacts.c.workflow_id == wf_id)
         if kind:
-            q += " AND kind=?"
-            args.append(kind)
-        with self._conn() as c:
-            rows = c.execute(q + " ORDER BY id", args).fetchall()
-        return [{**dict(r), "payload": json.loads(r["payload"])} for r in rows]
+            q = q.where(artifacts.c.kind == kind)
+        with self.engine.connect() as c:
+            rows = c.execute(q.order_by(artifacts.c.id)).all()
+        return [{**_row(r), "payload": json.loads(r.payload)} for r in rows]
 
     def latest(self, wf_id: str, kind: str) -> dict | None:
         items = self.artifacts(wf_id, kind)
