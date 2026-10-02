@@ -23,6 +23,7 @@ def render() -> None:
         "Choose a scenario and press Run. A fresh git repository is created from a small calculator project, "
         "the scenario's change is committed on a feature branch, and the pipeline analyses, risk-scores and "
         "really tests it. Each step below explains what it did and shows its actual output.",
+        chips=["1 · Pick a scenario", "2 · Run", "3 · Read the step-by-step report"],
     )
 
     left, right = st.columns([2, 3])

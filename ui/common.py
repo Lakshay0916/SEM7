@@ -13,9 +13,11 @@ from app.config import PROJECT_ROOT
 from app.git.repo import GitRepo, ProtectedBranchError
 from app.orchestration.store import Store
 from app.risk.predictor import MODEL_PATH, RiskPredictor
+from ui.style import is_dark
 
 RISK_DIR = PROJECT_ROOT / "data" / "risk"
-BAR_COLOR = "#2a78d6"  # single-series magnitude hue
+BAR_COLOR = {"light": "#2a78d6", "dark": "#3987e5"}  # single-series magnitude hue per theme
+LABEL_COLOR = {"light": "#3d4757", "dark": "#c3cad6"}
 
 RISK_BADGE = {"LOW": "🟢 LOW", "MEDIUM": "🟠 MEDIUM", "HIGH": "🔴 HIGH"}
 TEST_BADGE = {"PASS": "✅ PASS", "FAIL": "❌ FAIL", "ERROR": "⚠️ ERROR", "TIMEOUT": "⏱️ TIMEOUT"}
@@ -45,8 +47,9 @@ def hbar(df: pd.DataFrame, cat: str, val: str, fmt: str, x_title: str, sort="-x"
         x=alt.X(f"{val}:Q", title=x_title, axis=alt.Axis(format=fmt, gridOpacity=0.35, tickCount=5)),
         tooltip=[alt.Tooltip(f"{cat}:N"), alt.Tooltip(f"{val}:Q", format=fmt)],
     )
-    bars = base.mark_bar(color=BAR_COLOR, cornerRadiusEnd=4, size=18)
-    labels = base.mark_text(align="left", dx=4, fontSize=12, color="#3d4757").encode(
+    mode = "dark" if is_dark() else "light"
+    bars = base.mark_bar(color=BAR_COLOR[mode], cornerRadiusEnd=4, size=18)
+    labels = base.mark_text(align="left", dx=4, fontSize=12, color=LABEL_COLOR[mode]).encode(
         text=alt.Text(f"{val}:Q", format=fmt)
     )
     return (bars + labels).properties(height=alt.Step(30))

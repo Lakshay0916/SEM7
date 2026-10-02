@@ -1,9 +1,44 @@
+# Light and dark palettes are both defined, so the app follows the system
+# setting by default and users can switch via  ⋮ menu → Settings → Theme.
+
 [theme]
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+codeFont = "JetBrains Mono:https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap"
+baseRadius = "0.7rem"
+buttonRadius = "0.6rem"
+showWidgetBorder = true
+headingFontWeights = [800, 700, 650, 600, 600, 600]
+
+[theme.light]
 base = "light"
 primaryColor = "#2a78d6"
 backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f4f7fc"
-textColor = "#1d2433"
+secondaryBackgroundColor = "#f3f6fb"
+textColor = "#1a2233"
+borderColor = "#e2e8f0"
+dataframeHeaderBackgroundColor = "#f3f6fb"
+codeBackgroundColor = "#f3f6fb"
+linkColor = "#2a78d6"
+chartCategoricalColors = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
+
+[theme.light.sidebar]
+backgroundColor = "#f5f7fb"
+
+[theme.dark]
+base = "dark"
+primaryColor = "#3987e5"
+backgroundColor = "#0e131b"
+secondaryBackgroundColor = "#161d28"
+textColor = "#e6eaf0"
+borderColor = "#263142"
+dataframeHeaderBackgroundColor = "#161d28"
+codeBackgroundColor = "#131a24"
+linkColor = "#6da7ec"
+chartCategoricalColors = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"]
+
+[theme.dark.sidebar]
+backgroundColor = "#0a0f16"
 
 [server]
 headless = true

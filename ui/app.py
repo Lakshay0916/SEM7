@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import streamlit as st  # noqa: E402
 
-from ui.style import inject_css  # noqa: E402
+from ui.style import inject_css, sidebar_brand  # noqa: E402
 from ui.views import dashboard, how_it_works, risk_model, run_pipeline, workflows  # noqa: E402
 
 st.set_page_config(page_title="SEM7 Self-Healing CI/CD", page_icon="🛠️", layout="wide")
@@ -27,7 +27,6 @@ nav = st.navigation({
     "Pipeline": [pages["run"], pages["workflows"]],
     "Models": [pages["risk"]],
 })
-with st.sidebar:
-    st.markdown("**SEM7 · Self-Healing CI/CD**")
-    st.caption("ML predicts · RAG retrieves · LLM reasons · agents act · tests verify")
+sidebar_brand()
+st.sidebar.caption("🌓 Light / dark: **⋮ menu → Settings → Theme** (follows your system by default).")
 nav.run()

@@ -1,8 +1,7 @@
-import pandas as pd
 import streamlit as st
 
 from ui.content import STEPS, UPCOMING
-from ui.style import hero
+from ui.style import hero, is_dark
 
 _STYLE = """
   rankdir=LR; bgcolor="transparent"; nodesep=0.3; ranksep=0.35;
@@ -19,17 +18,35 @@ BUILT = "digraph A {" + _STYLE + """
   commit -> diff -> risk -> ci; ci -> pass [label="pass"]; ci -> fail [label="fail"];
 }"""
 
-AGENTS = "digraph B {" + _STYLE + """
+AGENTS = "digraph B {" + _STYLE.replace("rankdir=LR", "rankdir=TB; newrank=true") + """
   node [style="rounded,dashed", fillcolor="#fafbfc", color="#b4bcc9", fontcolor="#5b6475"];
   fail [label="FailureEvent", style="rounded,filled", fillcolor="#fdeaea", color="#ec9a9a", fontcolor="#1d2433"];
   inv [label="Investigation\\nagent"]; rag [label="RAG\\nretrieval"]; rc [label="Root cause\\nagent"];
   plan [label="Solution\\nplanner"]; appr [label="Human\\napproval", shape=hexagon];
   rep [label="Repair agent\\nai/repair/*"]; test [label="Testing\\nagent"]; pr [label="Pull\\nrequest"];
   refl [label="Reflection"];
-  fail -> inv -> rag -> rc -> plan -> appr; appr -> rep [label="approve"]; rep -> test; test -> pr [label="pass"];
-  test -> refl [label="fail"]; refl -> inv [style=dashed, label="retry (max 3)", constraint=false];
-  appr -> inv [style=dashed, label="reject", constraint=false];
+  { rank=same; fail; inv; rag; rc; plan; }
+  { rank=same; appr; rep; test; pr; }
+  fail -> inv -> rag -> rc -> plan;
+  plan -> appr; appr -> rep [label="approve"]; rep -> test; test -> pr [label="pass"];
+  test -> refl [label="fail"]; refl -> inv [style=dashed, label="retry (max 3)"];
+  appr -> inv [style=dashed, label="reject"];
 }"""
+
+
+_DARK = {  # light-diagram color -> dark-diagram color
+    "#eaf2fc": "#1a2a42", "#9fbfe6": "#3d6aa8", "#1d2433": "#e6eaf0",
+    "#e6f5e6": "#173524", "#9fd59f": "#2f8a52", "#fdeaea": "#3d1d22", "#ec9a9a": "#b54a4a",
+    "#fafbfc": "#141a24", "#b4bcc9": "#4c586b", "#5b6475": "#a9b3c2", "#8a93a3": "#7d889a", "#6b7588": "#97a1b1",
+}
+
+
+def _themed(dot: str) -> str:
+    if not is_dark():
+        return dot
+    for light, dark in _DARK.items():
+        dot = dot.replace(light, dark)
+    return dot
 
 
 def render() -> None:
@@ -38,26 +55,30 @@ def render() -> None:
         "One pipeline, clear responsibilities, a human in the loop",
         "A commit flows left to right. Solid boxes are built and running today; dashed boxes are the AI-agent "
         "stages planned next. The hexagon is the human approval gate - no code is changed without it.",
-        "ML predicts · RAG retrieves · LLM reasons · agents act · tests verify",
+        chips=["ML predicts", "RAG retrieves", "LLM reasons", "agents act", "tests verify"],
     )
     st.markdown("**Part 1 — built today:** commit → analysis → risk → real tests")
-    st.graphviz_chart(BUILT, width="stretch")
+    st.graphviz_chart(_themed(BUILT), width="stretch")
     st.markdown("**Part 2 — planned:** what the AI agents will do with a failure")
-    st.graphviz_chart(AGENTS, width="stretch")
+    st.graphviz_chart(_themed(AGENTS), width="stretch")
     st.caption("Solid = built (phases 1-4) · dashed = planned (phases 5-12) · red = hand-off point to the agents · "
                "hexagon = human approval gate")
 
     st.markdown("#### Who does what")
-    st.dataframe(pd.DataFrame([
-        ("ML risk model", "Predicts how risky a change is", "Does not find the bug or write the fix", "✅ Built"),
-        ("CI / test runner", "Runs the real tests and gives pass/fail evidence", "Never guesses a result", "✅ Built"),
-        ("Git layer", "Branches, commits, diffs", "Refuses AI writes to main", "✅ Built"),
-        ("State machine + store", "Tracks every step, saves every output", "Blocks illegal steps (e.g. repair without approval)", "✅ Built"),
-        ("RAG", "Retrieves relevant project code, tests and docs", "Never claims documents it did not retrieve", "⏳ Phase 6"),
-        ("LLM", "Reasons over evidence, writes structured proposals", "Outputs are typed and validated", "⏳ Phase 5-7"),
-        ("Agents", "Investigation, root cause, planning, repair, testing, reflection", "Each has one job", "⏳ Phase 5-11"),
-        ("Human", "Approves or rejects every proposed fix", "Final authority", "⏳ Phase 8"),
-    ], columns=["Component", "Responsibility", "Boundary", "Status"]), hide_index=True, width="stretch")
+    st.markdown(
+        "| Component | Responsibility | Boundary | Status |\n|---|---|---|---|\n"
+        "| ML risk model | Predicts how risky a change is | Does not find the bug or write the fix | ✅ Built |\n"
+        "| CI / test runner | Runs the real tests and gives pass/fail evidence | Never guesses a result | ✅ Built |\n"
+        "| Git layer | Branches, commits, diffs | Refuses AI writes to `main` | ✅ Built |\n"
+        "| State machine + store | Tracks every step, saves every output | Blocks illegal steps "
+        "(e.g. repair without approval) | ✅ Built |\n"
+        "| RAG | Retrieves relevant project code, tests and docs | Never claims documents it did not retrieve "
+        "| ⏳ Phase 6 |\n"
+        "| LLM | Reasons over evidence, writes structured proposals | Outputs are typed and validated | ⏳ Phase 5–7 |\n"
+        "| Agents | Investigation, root cause, planning, repair, testing, reflection | Each has one job "
+        "| ⏳ Phase 5–11 |\n"
+        "| Human | Approves or rejects every proposed fix | Final authority | ⏳ Phase 8 |"
+    )
 
     st.markdown("#### What happens in one run today")
     for i, key in enumerate(["sandbox", "diff", "risk", "tests", "failure", "record"], start=1):

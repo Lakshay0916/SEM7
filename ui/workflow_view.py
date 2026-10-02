@@ -8,7 +8,7 @@ import streamlit as st
 from app.models.schemas import PipelineRun, TestStatus
 from ui.common import RISK_BADGE, TEST_BADGE, get_predictor, get_store, try_ai_commit_to_main
 from ui.content import PROGRESS, STEPS, UPCOMING
-from ui.style import progress_bar, risk_gauge, step_header, upcoming_cards
+from ui.style import kv_tiles, progress_bar, risk_gauge, step_header, upcoming_cards
 
 
 def _progress(run: PipelineRun) -> None:
@@ -45,19 +45,16 @@ def render_workflow(wf_id: str) -> None:
     _progress(run)
 
     # 1. Sandbox + commit ------------------------------------------------------
-    with st.container(border=True):
+    with st.container(border=True, key="step-done-1"):
         s = STEPS["sandbox"]
         step_header(1, s["title"], "done", "✓ Done", s["what"], s["why"])
         c = run.commit
-        cols = st.columns(4)
-        cols[0].metric("Base branch", "main", help="Healthy baseline - tests pass here")
-        cols[1].metric("Feature branch", c.branch)
-        cols[2].metric("Commit", c.sha[:10])
-        cols[3].metric("Author", c.author)
+        kv_tiles({"Base branch (healthy)": "main", "Feature branch": c.branch,
+                  "Commit": c.sha[:10], "Author": c.author})
         st.markdown(f"**Commit message:** _{c.message}_")
 
     # 2. Diff -----------------------------------------------------------------------
-    with st.container(border=True):
+    with st.container(border=True, key="step-done-2"):
         s = STEPS["diff"]
         d = run.diff
         step_header(2, s["title"], "done",
@@ -78,15 +75,15 @@ def render_workflow(wf_id: str) -> None:
             st.code(d.patch or "(empty diff)", language="diff")
 
     # 3. Risk ----------------------------------------------------------------------
-    with st.container(border=True):
+    r = run.risk
+    risk_status = "plan" if r is None else {"LOW": "done", "MEDIUM": "warn", "HIGH": "fail"}[r.risk_level.value]
+    with st.container(border=True, key=f"step-{risk_status}-3"):
         s = STEPS["risk"]
-        r = run.risk
         if r is None:
             step_header(3, s["title"], "plan", "Skipped - no model", s["what"], s["why"])
             st.info("Train the model with `python scripts/train_risk_model.py` to enable this step.")
         else:
-            status = {"LOW": "done", "MEDIUM": "warn", "HIGH": "fail"}[r.risk_level.value]
-            step_header(3, s["title"], status, RISK_BADGE[r.risk_level.value], s["what"], s["why"])
+            step_header(3, s["title"], risk_status, RISK_BADGE[r.risk_level.value], s["what"], s["why"])
             left, right = st.columns([3, 2])
             with left:
                 predictor = get_predictor()
@@ -110,10 +107,10 @@ def render_workflow(wf_id: str) -> None:
                                  hide_index=True, width="stretch")
 
     # 4. Tests ---------------------------------------------------------------------
-    with st.container(border=True):
+    t = run.test_report
+    st_status = "done" if t.status == TestStatus.PASS else "fail"
+    with st.container(border=True, key=f"step-{st_status}-4"):
         s = STEPS["tests"]
-        t = run.test_report
-        st_status = "done" if t.status == TestStatus.PASS else "fail"
         step_header(4, s["title"], st_status, TEST_BADGE[t.status.value], s["what"], s["why"])
         cols = st.columns(5)
         cols[0].metric("Verdict", TEST_BADGE[t.status.value])
@@ -132,7 +129,7 @@ def render_workflow(wf_id: str) -> None:
             st.code((t.stdout + "\n" + t.stderr).strip() or "(no output)", language="text")
 
     # 5. Failure event ------------------------------------------------------------
-    with st.container(border=True):
+    with st.container(border=True, key=f"step-{'fail' if failed else 'done'}-5"):
         s = STEPS["failure"]
         if failed:
             ev = run.failure_event
@@ -146,7 +143,7 @@ def render_workflow(wf_id: str) -> None:
             st.success("All tests passed, so there is nothing to investigate or repair. The workflow ends here.")
 
     # 6. Recorded -------------------------------------------------------------------
-    with st.container(border=True):
+    with st.container(border=True, key="step-done-6"):
         s = STEPS["record"]
         step_header(6, s["title"], "done", f"✓ Recorded · {len(store.events(wf_id))} events", s["what"], s["why"])
         ev = pd.DataFrame(store.events(wf_id))
@@ -160,7 +157,7 @@ def render_workflow(wf_id: str) -> None:
                 st.json(a["payload"], expanded=False)
 
     # Safety + what's next ---------------------------------------------------------
-    with st.container(border=True):
+    with st.container(border=True, key="safety-card"):
         st.markdown("#### 🛡️ Safety check — can the AI write to `main`?")
         st.write("This tries an **AI-actor** commit on `main` in this workflow's sandbox. The Git guard "
                  "must refuse it and `main` must stay unchanged. Repairs are only ever allowed on "

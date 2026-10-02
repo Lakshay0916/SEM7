@@ -31,7 +31,9 @@ def render() -> None:
         "Predicting how likely a commit is to break CI",
         f"The model learned from {d['rows']:,} real commits in {len(d['repos'])} open-source Python projects, "
         f"each labelled with whether that project's real GitHub Actions tests passed or failed "
-        f"({d['failure_rate']:.1%} failed). It answers 'how risky is this change?' - it does not find the bug.",
+        f"({d['failure_rate']:.1%} failed). It answers 'how risky is this change?' — it does not find the bug.",
+        chips=[f"📦 {d['rows']:,} commits", f"🗂️ {len(d['repos'])} projects", "⏱️ Temporal split",
+               "⚖️ Compared with baselines"],
     )
 
     with st.expander("📚 How the dataset and model were built (4 steps)", expanded=False):
