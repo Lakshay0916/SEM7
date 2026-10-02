@@ -1,0 +1,156 @@
+[
+  {
+    "repo": "Textualize/rich",
+    "workflows": [
+      "pythonpackage.yml"
+    ],
+    "runs_fetched": 129,
+    "labelled_commits": 83,
+    "missing_locally": 0,
+    "rows": 83,
+    "failures": 2,
+    "failure_rate": 0.0241,
+    "date_range": [
+      "2025-09-10T10:22:34+00:00",
+      "2026-07-02T11:14:30+00:00"
+    ],
+    "seconds": 2.8
+  },
+  {
+    "repo": "encode/httpx",
+    "workflows": [
+      "test-suite.yml"
+    ],
+    "runs_fetched": 271,
+    "labelled_commits": 150,
+    "missing_locally": 0,
+    "rows": 150,
+    "failures": 4,
+    "failure_rate": 0.0267,
+    "date_range": [
+      "2025-08-26T21:07:54+00:00",
+      "2026-10-01T19:59:58+00:00"
+    ],
+    "seconds": 5.9
+  },
+  {
+    "repo": "jazzband/pip-tools",
+    "workflows": [
+      "ci.yml"
+    ],
+    "runs_fetched": 963,
+    "labelled_commits": 485,
+    "missing_locally": 0,
+    "rows": 485,
+    "failures": 61,
+    "failure_rate": 0.1258,
+    "date_range": [
+      "2025-09-15T17:28:29+00:00",
+      "2026-10-02T06:46:32+00:00"
+    ],
+    "seconds": 14.4
+  },
+  {
+    "repo": "pallets/click",
+    "workflows": [
+      "tests.yaml"
+    ],
+    "runs_fetched": 1000,
+    "labelled_commits": 934,
+    "missing_locally": 0,
+    "rows": 934,
+    "failures": 79,
+    "failure_rate": 0.0846,
+    "date_range": [
+      "2026-03-15T05:51:28+00:00",
+      "2026-09-24T15:23:53+00:00"
+    ],
+    "seconds": 40.3
+  },
+  {
+    "repo": "pallets/flask",
+    "workflows": [
+      "tests.yaml"
+    ],
+    "runs_fetched": 267,
+    "labelled_commits": 213,
+    "missing_locally": 0,
+    "rows": 213,
+    "failures": 50,
+    "failure_rate": 0.2347,
+    "date_range": [
+      "2025-08-18T16:42:27+00:00",
+      "2026-09-13T00:08:39+00:00"
+    ],
+    "seconds": 4.7
+  },
+  {
+    "repo": "psf/requests",
+    "workflows": [
+      "run-tests.yml"
+    ],
+    "runs_fetched": 441,
+    "labelled_commits": 291,
+    "missing_locally": 0,
+    "rows": 291,
+    "failures": 5,
+    "failure_rate": 0.0172,
+    "date_range": [
+      "2025-08-18T20:23:22+00:00",
+      "2026-09-28T16:55:51+00:00"
+    ],
+    "seconds": 37.2
+  },
+  {
+    "repo": "python-attrs/attrs",
+    "workflows": [
+      "ci.yml"
+    ],
+    "runs_fetched": 705,
+    "labelled_commits": 491,
+    "missing_locally": 0,
+    "rows": 491,
+    "failures": 36,
+    "failure_rate": 0.0733,
+    "date_range": [
+      "2025-08-28T02:00:02+00:00",
+      "2026-10-01T18:17:25+00:00"
+    ],
+    "seconds": 14.3
+  },
+  {
+    "repo": "python-poetry/poetry",
+    "workflows": [
+      "tests.yaml"
+    ],
+    "runs_fetched": 1000,
+    "labelled_commits": 861,
+    "missing_locally": 0,
+    "rows": 861,
+    "failures": 77,
+    "failure_rate": 0.0894,
+    "date_range": [
+      "2026-02-13T13:39:29+00:00",
+      "2026-10-02T08:10:10+00:00"
+    ],
+    "seconds": 38.1
+  },
+  {
+    "repo": "sqlalchemy/alembic",
+    "workflows": [
+      "run-test.yaml",
+      "run-on-pr.yaml"
+    ],
+    "runs_fetched": 163,
+    "labelled_commits": 117,
+    "missing_locally": 0,
+    "rows": 117,
+    "failures": 9,
+    "failure_rate": 0.0769,
+    "date_range": [
+      "2025-08-17T21:30:51+00:00",
+      "2026-10-01T18:23:35+00:00"
+    ],
+    "seconds": 5.0
+  }
+]

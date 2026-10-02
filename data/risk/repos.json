@@ -1,0 +1,11 @@
+[
+  {"name": "pallets/flask", "workflows": ["tests.yaml"]},
+  {"name": "pallets/click", "workflows": ["tests.yaml"]},
+  {"name": "encode/httpx", "workflows": ["test-suite.yml"]},
+  {"name": "Textualize/rich", "workflows": ["pythonpackage.yml"]},
+  {"name": "psf/requests", "workflows": ["run-tests.yml"]},
+  {"name": "sqlalchemy/alembic", "workflows": ["run-test.yaml", "run-on-pr.yaml"]},
+  {"name": "python-attrs/attrs", "workflows": ["ci.yml"]},
+  {"name": "jazzband/pip-tools", "workflows": ["ci.yml"]},
+  {"name": "python-poetry/poetry", "workflows": ["tests.yaml"]}
+]
