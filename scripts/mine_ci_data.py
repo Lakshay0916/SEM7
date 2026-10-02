@@ -42,7 +42,7 @@ def main() -> int:
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-    specs = [RepoSpec(**r) for r in json.loads(Path(args.repos).read_text())]
+    specs = [RepoSpec(**r) for r in json.loads(Path(args.repos).read_text(encoding="utf-8"))]
     if args.only:
         specs = [s for s in specs if s.name in args.only]
     client = GitHubClient()
@@ -66,10 +66,10 @@ def main() -> int:
 
     # Merge with summaries of repos not mined in this invocation.
     summary_path = DATA / "mining_summary.json"
-    previous = json.loads(summary_path.read_text()) if summary_path.exists() else []
+    previous = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else []
     mined = {s["repo"] for s in summaries}
     summaries = [s for s in previous if s["repo"] not in mined] + summaries
-    summary_path.write_text(json.dumps(sorted(summaries, key=lambda s: s["repo"]), indent=2))
+    summary_path.write_text(json.dumps(sorted(summaries, key=lambda s: s["repo"]), indent=2), encoding="utf-8")
 
     parts = [pd.read_csv(f) for f in sorted((DATA / "rows").glob("*.csv"))]
     df = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()

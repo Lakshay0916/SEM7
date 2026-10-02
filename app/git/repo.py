@@ -40,6 +40,8 @@ class GitRepo:
             cwd=self.path,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         if check and proc.returncode != 0:
             raise GitError(f"git {' '.join(args)} failed: {proc.stderr.strip()}")
@@ -104,7 +106,9 @@ class GitRepo:
         return self._run("diff", "--name-status", "--no-color", "--no-renames", base, head)
 
     def show_file(self, ref: str, path: str) -> str:
-        return self._run("show", f"{ref}:{path}")
+        # Normalise line endings so content compares equal to files read in text mode
+        # (git on Windows may hand back CRLF).
+        return self._run("show", f"{ref}:{path}").replace("\r\n", "\n")
 
     # --------------------------------------------------------------- mutation
 

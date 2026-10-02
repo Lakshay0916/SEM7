@@ -65,3 +65,12 @@ def test_invalid_targets_rejected(make_project, target):
     root = make_project({"tests/test_a.py": PASSING})
     with pytest.raises(ValueError):
         run_tests(root, targets=[target])
+
+
+def test_node_id_normalises_windows_separators():
+    import xml.etree.ElementTree as ET
+
+    from app.ci.test_runner import _node_id
+
+    case = ET.fromstring('<testcase classname="tests.sub.test_a.TestX" name="test_y" file="tests\\sub\\test_a.py"/>')
+    assert _node_id(case) == "tests/sub/test_a.py::TestX::test_y"

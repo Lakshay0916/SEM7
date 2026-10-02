@@ -4,15 +4,16 @@ from app.ci.scenarios import SCENARIOS
 from app.orchestration.pipeline import run_ci_workflow
 from ui.common import get_predictor, get_store
 from ui.style import hero
-from ui.workflow_view import render_workflow
+from ui.workflow_view import render_workflow, strategy
 
-STEP_LABEL = {"sandbox": "1 · Commit", "diff": "2 · Diff", "risk": "3 · Risk", "tests": "4 · Tests"}
+STEP_LABEL = {"sandbox": "1 · Commit", "diff": "2 · Diff", "risk": "3 · Risk", "tests": "4 · Tests",
+              "heal": "6 · Self-healing"}
 
 SCENARIO_HINT = {
-    "simple_bug": "Expect: tests **fail** (2 of 9). Later phases will fix it in one attempt.",
+    "simple_bug": "Expect: tests **fail** (2 of 9); one minimal fix (restore `+`) repairs it after your approval.",
     "high_risk_change": "Expect: tests **pass** but the change is broad - shows that risk ≠ bug.",
-    "failed_first_repair": "Expect: tests **fail** (3 of 9) from two separate defects - "
-                           "the scenario that will demonstrate reflection.",
+    "failed_first_repair": "Expect: tests **fail** (3 of 9) from two defects. Fix 1 only partly works → "
+                           "reflection → fix 2 → tests pass → PR.",
 }
 
 
@@ -56,11 +57,13 @@ def render() -> None:
             def on_step(step: str, detail: str) -> None:
                 st.write(f"**{STEP_LABEL.get(step, step)}** — {detail}")
 
-            result = run_ci_workflow(scenario_id, get_store(), predictor, on_step=on_step)
-            st.write(f"**5 · Record** — saved as workflow `{result.workflow_id}`")
+            result = run_ci_workflow(scenario_id, get_store(), predictor, on_step=on_step,
+                                     strategy=strategy())
+            st.write(f"**7 · Record** — saved as workflow `{result.workflow_id}`")
             verdict = result.run.test_report.status.value
             status.update(
-                label=f"Done - tests {verdict}. Scroll down for the step-by-step explanation.",
+                label=(f"Tests {verdict} - a fix has been proposed. Scroll down to review and approve it."
+                       if verdict != "PASS" else "Tests PASS - scroll down for the step-by-step explanation."),
                 state="error" if verdict != "PASS" else "complete", expanded=False,
             )
         st.session_state["current_wf"] = result.workflow_id

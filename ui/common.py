@@ -21,7 +21,6 @@ LABEL_COLOR = {"light": "#3d4757", "dark": "#c3cad6"}
 
 RISK_BADGE = {"LOW": "🟢 LOW", "MEDIUM": "🟠 MEDIUM", "HIGH": "🔴 HIGH"}
 TEST_BADGE = {"PASS": "✅ PASS", "FAIL": "❌ FAIL", "ERROR": "⚠️ ERROR", "TIMEOUT": "⏱️ TIMEOUT"}
-IMPLEMENTED_PHASE = 4
 
 
 @st.cache_resource

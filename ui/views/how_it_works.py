@@ -19,15 +19,17 @@ BUILT = "digraph A {" + _STYLE + """
 }"""
 
 AGENTS = "digraph B {" + _STYLE.replace("rankdir=LR", "rankdir=TB; newrank=true") + """
-  node [style="rounded,dashed", fillcolor="#fafbfc", color="#b4bcc9", fontcolor="#5b6475"];
-  fail [label="FailureEvent", style="rounded,filled", fillcolor="#fdeaea", color="#ec9a9a", fontcolor="#1d2433"];
-  inv [label="Investigation\\nagent"]; rag [label="RAG\\nretrieval"]; rc [label="Root cause\\nagent"];
-  plan [label="Solution\\nplanner"]; appr [label="Human\\napproval", shape=hexagon];
-  rep [label="Repair agent\\nai/repair/*"]; test [label="Testing\\nagent"]; pr [label="Pull\\nrequest"];
+  fail [label="FailureEvent", fillcolor="#fdeaea", color="#ec9a9a"];
+  inv [label="Investigate\\n(rule-based → LLM)"]; rc [label="Root cause\\n(rule-based → LLM)"];
+  plan [label="Plan fix\\n(rule-based → LLM)"]; appr [label="Human\\napproval", shape=hexagon];
+  rag [label="RAG\\nretrieval", style="rounded,dashed", fillcolor="#fafbfc", color="#b4bcc9", fontcolor="#5b6475"];
+  rep [label="Repair on\\nai/repair/*"]; test [label="Re-test\\n(real pytest)"];
+  pr [label="Pull request\\n(not merged)", fillcolor="#e6f5e6", color="#9fd59f"];
   refl [label="Reflection"];
-  { rank=same; fail; inv; rag; rc; plan; }
+  { rank=same; fail; inv; rc; plan; }
   { rank=same; appr; rep; test; pr; }
-  fail -> inv -> rag -> rc -> plan;
+  fail -> inv -> rc -> plan;
+  rag -> rc [style=dashed, label="planned"];
   plan -> appr; appr -> rep [label="approve"]; rep -> test; test -> pr [label="pass"];
   test -> refl [label="fail"]; refl -> inv [style=dashed, label="retry (max 3)"];
   appr -> inv [style=dashed, label="reject"];
@@ -53,42 +55,55 @@ def render() -> None:
     st.title("How it works")
     hero(
         "One pipeline, clear responsibilities, a human in the loop",
-        "A commit flows left to right. Solid boxes are built and running today; dashed boxes are the AI-agent "
-        "stages planned next. The hexagon is the human approval gate - no code is changed without it.",
+        "Solid boxes run today. Investigation, root cause and planning are rule-based for now and will be "
+        "replaced by LLM agents through the same interface; RAG (dashed) is planned. The hexagon is the human "
+        "approval gate - no code is changed without it.",
         chips=["ML predicts", "RAG retrieves", "LLM reasons", "agents act", "tests verify"],
     )
     st.markdown("**Part 1 — built today:** commit → analysis → risk → real tests")
     st.graphviz_chart(_themed(BUILT), width="stretch")
-    st.markdown("**Part 2 — planned:** what the AI agents will do with a failure")
+    st.markdown("**Part 2 — built (rule-based today):** the human-approved self-healing loop")
     st.graphviz_chart(_themed(AGENTS), width="stretch")
-    st.caption("Solid = built (phases 1-4) · dashed = planned (phases 5-12) · red = hand-off point to the agents · "
+    st.caption("Solid = built · dashed = planned · red = failure evidence · green = validated outcome · "
                "hexagon = human approval gate")
 
     st.markdown("#### Who does what")
     st.markdown(
         "| Component | Responsibility | Boundary | Status |\n|---|---|---|---|\n"
         "| ML risk model | Predicts how risky a change is | Does not find the bug or write the fix | ✅ Built |\n"
+        "| Quality gate | PASS / REVIEW / BLOCK from tests + risk | Tests always run; risk only adds review | ✅ Built |\n"
         "| CI / test runner | Runs the real tests and gives pass/fail evidence | Never guesses a result | ✅ Built |\n"
         "| Git layer | Branches, commits, diffs | Refuses AI writes to `main` | ✅ Built |\n"
-        "| State machine + store | Tracks every step, saves every output | Blocks illegal steps "
-        "(e.g. repair without approval) | ✅ Built |\n"
+        "| Repair strategy | Investigate → root cause → plan | Pluggable interface; proposes, never applies | "
+        "✅ Rule-based · LLM next |\n"
+        "| Self-healing loop | Approval → repair branch → re-test → reflect → PR | Bounded retries; never merges | "
+        "✅ Built |\n"
+        "| Human | Approves or rejects every proposed fix | Final authority | ✅ Built |\n"
+        "| State machine + store | Tracks every step, saves every output | Blocks illegal steps | ✅ Built |\n"
         "| RAG | Retrieves relevant project code, tests and docs | Never claims documents it did not retrieve "
-        "| ⏳ Phase 6 |\n"
-        "| LLM | Reasons over evidence, writes structured proposals | Outputs are typed and validated | ⏳ Phase 5–7 |\n"
-        "| Agents | Investigation, root cause, planning, repair, testing, reflection | Each has one job "
-        "| ⏳ Phase 5–11 |\n"
-        "| Human | Approves or rejects every proposed fix | Final authority | ⏳ Phase 8 |"
+        "| ⏳ Agentic AI |\n"
+        "| LLM agents | Reason over evidence, propose richer fixes | Same interface, gate and tests | ⏳ Agentic AI |"
+    )
+
+    st.markdown("#### DevOps: how it runs in CI")
+    st.markdown(
+        "- **GitHub Actions** (`.github/workflows/ci.yml`) runs on every push and pull request: the full test "
+        "suite on Linux and Windows, the **risk-aware quality gate** (`scripts/ci_gate.py`), and a Docker build.\n"
+        "- **Quality gate:** tests always run. Failing tests → **BLOCK** (red check); passing tests but HIGH risk → "
+        "**REVIEW** (warning annotation); otherwise **PASS**. The gate's report appears in the run summary.\n"
+        "- **Docker:** `docker compose up` starts this dashboard with the same Python environment everywhere.\n"
+        "- **Reports:** `scripts/export_report.py` exports any workflow as Markdown."
     )
 
     st.markdown("#### What happens in one run today")
-    for i, key in enumerate(["sandbox", "diff", "risk", "tests", "failure", "record"], start=1):
+    for i, key in enumerate(["sandbox", "diff", "risk", "tests", "failure", "heal", "record"], start=1):
         s = STEPS[key]
         with st.expander(f"{i} · {s['title']}"):
             st.markdown(f"**What happens:** {s['what']}\n\n**Why it matters:** {s['why']}")
 
     st.markdown("#### What comes next")
-    for title, phase, desc in UPCOMING:
-        st.markdown(f"- **{title}** _(phase {phase})_ — {desc}")
+    for title, track, desc in UPCOMING:
+        st.markdown(f"- **{title}** _({track})_ — {desc}")
 
     st.markdown("#### Safety rules enforced in code")
     st.markdown(
@@ -101,6 +116,9 @@ def render() -> None:
         "project | `app/ci/test_runner.py` |\n"
         "| No repair without approval | The state machine only allows APPROVED → REPAIRING | "
         "`app/orchestration/state.py` |\n"
+        "| No \"fixing\" tests to pass | Repairs may not modify tests, CI config or dependency files; each edit "
+        "must match exactly once | `app/healing/patcher.py` |\n"
+        "| No auto-merge | PRs are opened only after real tests pass and are never merged | `app/healing/loop.py` |\n"
         "| No leaked secrets | Secrets come from env only, are hidden from repr, and are redacted in logs and the "
         "database | `app/config.py`, `app/logging_utils.py` |\n"
         "| No infinite repair loops | Retries capped by `MAX_REPAIR_ATTEMPTS` (default 3) | `app/config.py` |"

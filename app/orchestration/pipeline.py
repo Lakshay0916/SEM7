@@ -1,9 +1,9 @@
-"""Orchestrates the implemented part of the workflow and records it in the Store:
+"""Orchestrates the CI part of the workflow and records it in the Store:
 
 RECEIVED -> RISK_ANALYZED -> TESTING -> PASSED | FAILED
 
-Later phases (investigation, RAG, root cause, approval, repair, ...) continue
-from FAILED.
+On FAILED, if a RepairStrategy is given, the self-healing loop (app/healing/loop.py)
+investigates and proposes a fix, then stops at WAITING_APPROVAL for a human.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.ci.scenarios import get_scenario
+from app.ci.quality_gate import evaluate_gate
 from app.ci.simulator import StepCallback, create_sandbox, run_pipeline
 from app.models.schemas import PipelineRun
 from app.models.schemas import WorkflowState as S
@@ -34,6 +35,7 @@ def run_ci_workflow(
     predictor=None,
     workspace: Path | None = None,
     on_step: StepCallback | None = None,
+    strategy=None,
 ) -> WorkflowResult:
     scenario = get_scenario(scenario_id)
     if on_step:
@@ -61,11 +63,23 @@ def run_ci_workflow(
         f"{report.tests_errored} errors",
         duration_ms=int(report.duration_seconds * 1000),
     )
+    gate = evaluate_gate(report, run.risk)
+    store.log_event(wf, "quality_gate", gate.status.value.lower(), f"Quality gate {gate.status.value}: "
+                    + "; ".join(gate.reasons[:2]))
     if run.failure_event is None:
         store.transition(wf, S.PASSED, "All tests passed - no repair needed", agent="ci")
     else:
         store.save_artifact(wf, "failure_event", run.failure_event)
         store.transition(wf, S.FAILED, f"CI failure detected: {len(run.failure_event.failed_tests)} "
                          "failing test(s)", agent="ci")
+        if strategy is not None:
+            from app.healing.loop import propose_fix  # local import: healing depends on orchestration
+
+            if on_step:
+                on_step("heal", f"Investigating the failure with the {strategy.name} strategy")
+            plan = propose_fix(store, wf, strategy)
+            if on_step:
+                on_step("heal", f"Fix proposed ({plan.level}) - waiting for your approval" if plan
+                        else "No applicable repair - human needed")
     log.info("workflow %s finished CI stage in state %s", wf, store.state(wf).value)
     return WorkflowResult(workflow_id=wf, repo_dir=repo_dir, run=run)

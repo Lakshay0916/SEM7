@@ -1,0 +1,15 @@
+.git
+.github
+.env
+.vscode
+.idea
+.DS_Store
+**/__pycache__
+**/*.pyc
+.pytest_cache
+workspace
+*.sqlite3
+*.db
+# mined raw CI metadata is only needed to re-mine; the trained model and evaluation are kept
+data/risk/raw
+data/risk/rows

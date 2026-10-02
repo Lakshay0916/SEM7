@@ -39,7 +39,8 @@ def _node_id(case: ET.Element) -> str:
     file = case.get("file")
     if not file:
         return f"{classname}::{name}" if classname else name
-    module = file[:-3].replace("/", ".").replace("\\", ".") if file.endswith(".py") else file
+    file = file.replace("\\", "/")  # pytest reports OS-native separators; node ids are always POSIX
+    module = file[:-3].replace("/", ".") if file.endswith(".py") else file
     cls = classname[len(module) + 1 :] if classname.startswith(module + ".") else ""
     return "::".join(p for p in (file, *cls.split("."), name) if p)
 
@@ -93,12 +94,13 @@ def run_tests(
             *targets,
         ]
         display_cmd = shlex.join(["pytest", "-q", *targets])
-        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "utf-8"}
 
         start = time.monotonic()
         try:
             proc = subprocess.run(
-                cmd, cwd=project_dir, capture_output=True, text=True, timeout=timeout, env=env
+                cmd, cwd=project_dir, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=timeout, env=env
             )
         except subprocess.TimeoutExpired as exc:
             return TestReport(

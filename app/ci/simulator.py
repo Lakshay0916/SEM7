@@ -54,12 +54,12 @@ def create_sandbox(scenario: Scenario, workspace: Path | None = None) -> Path:
             if path.exists():
                 raise ValueError(f"scenario would overwrite existing file {edit.file}")
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(edit.new)
+            path.write_text(edit.new, encoding="utf-8")
             continue
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         if edit.old not in content:
             raise ValueError(f"scenario edit target not found in {edit.file}: {edit.old!r}")
-        path.write_text(content.replace(edit.old, edit.new, 1))
+        path.write_text(content.replace(edit.old, edit.new, 1), encoding="utf-8")
     repo.commit_all(scenario.commit_message)
     return repo_dir
 

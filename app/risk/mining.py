@@ -91,7 +91,7 @@ def fetch_runs(client: GitHubClient, spec: RepoSpec, max_runs: int, cache_dir: P
                refresh: bool = False) -> list[dict]:
     cache = cache_dir / f"{spec.slug}_runs.json"
     if cache.exists() and not refresh:
-        return json.loads(cache.read_text())
+        return json.loads(cache.read_text(encoding="utf-8"))
     keep = ("id", "name", "head_sha", "head_branch", "event", "status", "conclusion",
             "created_at", "updated_at", "run_attempt")
     runs: list[dict] = []
@@ -123,7 +123,7 @@ def fetch_runs(client: GitHubClient, spec: RepoSpec, max_runs: int, cache_dir: P
     with ThreadPoolExecutor(4) as pool:
         list(pool.map(jobs_for, failed))
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache.write_text(json.dumps(runs))
+    cache.write_text(json.dumps(runs), encoding="utf-8")
     return runs
 
 
@@ -169,7 +169,8 @@ def aggregate_labels(runs: list[dict]) -> dict[str, CommitLabel]:
 
 
 def _git(cwd: Path, *args: str, check: bool = True, input: str | None = None) -> str:
-    proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, input=input)
+    proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", input=input)
     if check and proc.returncode != 0:
         raise RuntimeError(f"git {args[0]} failed: {proc.stderr.strip()[:300]}")
     return proc.stdout

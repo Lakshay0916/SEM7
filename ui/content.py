@@ -65,41 +65,57 @@ STEPS = {
         "title": "Workflow recorded",
         "what": (
             "Each stage moved the workflow through a state machine (RECEIVED → RISK_ANALYZED → TESTING → "
-            "PASSED/FAILED) and every output was saved to SQLite with a timestamp."
+            "FAILED → … → PR_CREATED) and every output and human decision was saved to SQLite with a timestamp."
         ),
         "why": (
-            "Full traceability: anyone can audit commit → risk → tests → failure → (later) fix → PR. The "
-            "state machine also makes illegal jumps, like repairing without approval, impossible."
+            "Full traceability: anyone can audit commit → risk → tests → failure → plan → approval → repair → "
+            "re-test → PR. The state machine also makes illegal jumps, like repairing without approval, impossible."
         ),
     },
 }
 
-# Stages not built yet, shown so the user sees where the pipeline is going.
+STEPS["heal"] = {
+    "title": "Self-healing loop (human-approved)",
+    "what": (
+        "The failure is investigated (facts vs. hypotheses), a root cause is identified with a confidence score, "
+        "and a concrete fix is proposed. Only after you approve is it applied - on a separate `ai/repair/<id>` "
+        "branch - and the real test suite re-run. If tests still fail, reflection records what changed and a new "
+        "plan is proposed (max 3 attempts). A validated fix becomes a pull request that is never auto-merged."
+    ),
+    "why": (
+        "This closes the CI loop safely. Today the analysis is rule-based (no LLM): it restores the smallest "
+        "changed operator first, and escalates to restoring the whole function only if tests still fail. The "
+        "planned LLM agents plug into exactly the same interface, approval gate and test verification."
+    ),
+}
+
+# Remaining roadmap: (title, track, description)
 UPCOMING = [
-    ("Investigation Agent", 5, "Reads the FailureEvent and summarises what failed, separating evidence from guesses."),
-    ("RAG knowledge retrieval", 6, "Searches the project's code, tests and docs for the context relevant to the failure."),
-    ("Root Cause Agent", 7, "Explains why the failure happened, with evidence and a confidence score."),
-    ("Solution Planner", 7, "Proposes exact code changes, tests to run, risks and a rollback plan."),
-    ("Human approval", 8, "You review the AI debugging report and approve or reject the fix. Nothing changes without this."),
-    ("Code Repair Agent", 9, "Applies only the approved change, on a separate `ai/repair/<id>` branch - never on main."),
-    ("Testing Agent + Reflection", 10, "Re-runs the real tests. If they fail, the system re-investigates (max 3 attempts)."),
-    ("Pull Request", 12, "Opens a PR with the problem, root cause, fix and test evidence. Never auto-merged."),
+    ("RAG knowledge retrieval", "Agentic AI",
+     "Search the project's code, tests, docs and history for context relevant to the failure."),
+    ("LLM investigation & root-cause agents", "Agentic AI",
+     "Replace the rule-based analysis via the same RepairStrategy interface - same approval gate, same real tests."),
+    ("LLM solution planner", "Agentic AI",
+     "Propose fixes beyond reverting the commit (new logic, multi-file changes), still validated by tests."),
+    ("GitHub PR adapter", "DevOps",
+     "Open real pull requests on GitHub; sandboxes use the local adapter today."),
 ]
 
-# Top-of-page progress bar labels: (step id or None, label, phase)
+# Progress strip: (key, label, status, workflow state that marks it reached)
+# status: built | rule (built, rule-based now, LLM agent later) | planned
 PROGRESS = [
-    ("sandbox", "Commit", 2),
-    ("diff", "Diff", 2),
-    ("risk", "Risk", 3),
-    ("tests", "Tests", 2),
-    (None, "Investigate", 5),
-    (None, "RAG", 6),
-    (None, "Root cause", 7),
-    (None, "Plan", 7),
-    (None, "Approval", 8),
-    (None, "Repair", 9),
-    (None, "Re-test", 10),
-    (None, "PR", 12),
+    ("sandbox", "Commit", "built", "RECEIVED"),
+    ("diff", "Diff", "built", "RECEIVED"),
+    ("risk", "Risk", "built", "RISK_ANALYZED"),
+    ("tests", "Tests", "built", "TESTING"),
+    ("investigate", "Investigate", "rule", "INVESTIGATING"),
+    ("rag", "RAG", "planned", None),
+    ("rootcause", "Root cause", "rule", "ROOT_CAUSE_IDENTIFIED"),
+    ("plan", "Plan", "rule", "SOLUTION_PROPOSED"),
+    ("approval", "Approval", "built", "APPROVED"),
+    ("repair", "Repair", "built", "REPAIRING"),
+    ("retest", "Re-test", "built", "TESTING_REPAIR"),
+    ("pr", "PR", "built", "PR_CREATED"),
 ]
 
 GLOSSARY = {

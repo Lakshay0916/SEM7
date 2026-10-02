@@ -51,12 +51,23 @@ def test_run_pipeline_button_produces_failed_workflow():
     assert not at.exception, at.exception
     assert "current_wf" in at.session_state
     captions = " ".join(c.value for c in at.caption)
-    assert "final state **FAILED**" in captions
-    # the guided report renders all six implemented steps
+    assert "final state **WAITING_APPROVAL**" in captions  # a fix is proposed, nothing applied yet
     html = " ".join(m.value for m in at.markdown)
     for title in ("Change analysis", "ML risk prediction", "CI test run", "Failure evidence packaged",
-                  "Workflow recorded"):
+                  "Self-healing loop", "Workflow recorded"):
         assert title in html
+
+
+def test_approve_button_repairs_and_opens_pr():
+    at = _page("ui.views.run_pipeline").run()
+    at.radio[0].set_value("simple_bug").run()
+    at.button[0].click().run()
+    wf = at.session_state["current_wf"]
+    at.button(key=f"approve-{wf}").click().run()
+    assert not at.exception, at.exception
+    captions = " ".join(c.value for c in at.caption)
+    assert "final state **PR_CREATED**" in captions
+    assert any("not merged" in s.value for s in at.success)
 
 
 def test_workflow_history_replays_a_run():

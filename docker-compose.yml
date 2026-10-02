@@ -1,0 +1,31 @@
+# docker compose up                       -> dashboard on http://localhost:8502
+# docker compose run --rm tests           -> run the test suite in the container
+# docker compose run --rm cli python scripts/run_ci.py --scenario failed_first_repair --heal --approve
+services:
+  dashboard:
+    build: .
+    image: sem7-selfheal:latest
+    ports:
+      - "8502:8502"
+    volumes:
+      - workspace:/app/workspace   # sandboxes + SQLite workflow store survive restarts
+    env_file:
+      - path: .env
+        required: false
+    restart: unless-stopped
+
+  tests:
+    image: sem7-selfheal:latest
+    profiles: ["tools"]
+    command: ["python", "-m", "pytest", "-q"]
+
+  cli:
+    image: sem7-selfheal:latest
+    profiles: ["tools"]
+    volumes:
+      - workspace:/app/workspace
+    entrypoint: []
+    command: ["python", "scripts/run_ci.py", "--list"]
+
+volumes:
+  workspace:

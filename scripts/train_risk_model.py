@@ -99,8 +99,8 @@ def main() -> int:
 
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(bundle, MODEL_PATH, compress=3)
-    (DATA / "evaluation.json").write_text(json.dumps(report, indent=2))
-    (DATA / "EVALUATION.md").write_text(markdown(report))
+    (DATA / "evaluation.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    (DATA / "EVALUATION.md").write_text(markdown(report), encoding="utf-8")
     print(markdown(report))
     print(f"Saved model -> {MODEL_PATH}")
     return 0

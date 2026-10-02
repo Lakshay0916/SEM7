@@ -227,3 +227,61 @@ class RepairPlan(BaseModel):
     tests: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     rollback_plan: str = ""
+    strategy: str = Field(default="", description="Which RepairStrategy produced this plan")
+    strategy_kind: str = Field(default="", description="rule-based | llm-agent")
+    level: str = Field(default="", description="Strategy-specific escalation level, e.g. operator-restore")
+    attempt: int = 1
+
+
+# --------------------------------------------------------------------------- #
+# Self-healing loop
+# --------------------------------------------------------------------------- #
+
+
+class ApprovalDecision(BaseModel):
+    approved: bool
+    reviewer: str
+    comment: str = ""
+    plan_attempt: int
+    decided_at: datetime = Field(default_factory=utcnow)
+
+
+class RepairAttempt(BaseModel):
+    attempt: int
+    branch: str
+    base_commit: str = Field(description="Commit the attempt was applied on top of")
+    commit_sha: str
+    changed_files: list[str] = Field(default_factory=list)
+    patch: str = ""
+
+
+class Reflection(BaseModel):
+    attempt: int
+    still_failing: list[str] = Field(default_factory=list)
+    newly_fixed: list[str] = Field(default_factory=list)
+    regressions: list[str] = Field(default_factory=list, description="Tests that passed before but fail now")
+    summary: str
+    will_retry: bool
+
+
+class PullRequestRecord(BaseModel):
+    provider: str = Field(description="local | github")
+    title: str
+    head_branch: str
+    base_branch: str
+    url: str = Field(description="Web URL, or path to the PR description for the local adapter")
+    body: str = ""
+    merged: bool = False  # never merged automatically
+
+
+class GateStatus(str, Enum):
+    PASS = "PASS"
+    REVIEW = "REVIEW"  # tests passed but a human should look (e.g. HIGH risk)
+    BLOCK = "BLOCK"  # tests failed / errored / timed out
+
+
+class GateDecision(BaseModel):
+    status: GateStatus
+    reasons: list[str] = Field(default_factory=list)
+    risk_level: RiskLevel | None = None
+    test_status: TestStatus

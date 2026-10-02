@@ -1,7 +1,7 @@
 import pandas as pd
 import streamlit as st
 
-from ui.common import IMPLEMENTED_PHASE, get_predictor, get_store, load_json
+from ui.common import get_predictor, get_store, load_json
 from ui.content import PROGRESS
 from ui.style import hero, tiles
 
@@ -19,11 +19,12 @@ def render() -> None:
     st.title("AI Self-Healing CI/CD")
     hero(
         "From a broken commit to a verified fix — with a human in control",
-        "When a commit breaks the tests, this system predicts how risky the change was and captures the real "
-        "test evidence. In the next phases, AI agents use project knowledge to find the root cause, propose a fix "
-        "for your approval, apply it on a separate branch and prove it with real tests before opening a pull request.",
-        chips=["✅ Phases 1–4 built", "🧪 Real tests, never faked", "🛡️ AI can't touch main",
-               "📈 ML trained on 3,625 real commits"],
+     "When a commit breaks the tests, this system scores how risky the change was, captures the real test "
+        "evidence, investigates the root cause and proposes a fix. After your approval it repairs on a separate "
+        "branch, proves the fix with real tests (reflecting and retrying if needed) and opens a pull request. "
+        "Analysis is rule-based today; LLM agents and RAG plug into the same loop next.",
+        chips=["🔁 Self-healing loop with human approval", "🧪 Real tests, never faked", "🛡️ AI can't touch main",
+               "🚦 Risk-aware quality gate", "🐳 Docker + GitHub Actions"],
     )
 
     store = get_store()
@@ -35,7 +36,8 @@ def render() -> None:
     cols[0].metric("Workflows run", len(wfs), help="Each click of 'Run' on the Run Pipeline page")
     cols[1].metric("CI failures caught", sum(w["state"] == "FAILED" for w in wfs),
                    help="Runs where the real tests failed and a FailureEvent was produced")
-    cols[2].metric("Passed CI", sum(w["state"] == "PASSED" for w in wfs))
+    cols[2].metric("Fixes validated → PR", sum(w["state"] == "PR_CREATED" for w in wfs),
+                   help="Repairs that passed the real test suite and produced a pull request")
     if evaluation:
         full = evaluation["variants"]["full"]
         test = full["candidates"][full["chosen_model"]]["test"]
@@ -46,10 +48,10 @@ def render() -> None:
 
     st.markdown("#### What's working today")
     tiles([
-        ("🧬", "Change analysis", "Git diff → files, line counts and the exact functions that changed (via Python's AST)."),
-        ("📈", "ML risk score", "LOW / MEDIUM / HIGH with readable reasons, from a model trained on real CI history."),
+        ("📈", "ML risk + quality gate", "Risk scored before tests; tests always run; HIGH risk adds a review flag."),
         ("🧪", "Real CI tests", "pytest actually runs; PASS only with real evidence — timeouts and crashes never pass."),
-        ("🧭", "Full traceability", "Every state change and output saved to SQLite; illegal steps are blocked."),
+        ("🔁", "Self-healing loop", "Investigate → root cause → plan → your approval → repair branch → re-test → PR."),
+        ("🧭", "Full traceability", "Every state change, decision and output saved to SQLite and exportable."),
     ])
 
     st.markdown("#### Get started")
@@ -79,13 +81,14 @@ def render() -> None:
             st.info("No workflows yet — open **Run Pipeline** to run a demo scenario.")
     with right:
         st.markdown("#### Build progress")
-        built = sum(phase <= IMPLEMENTED_PHASE for _, _, phase in PROGRESS)
-        st.progress(built / len(PROGRESS), text=f"{built} of {len(PROGRESS)} pipeline stages built")
+        built = sum(status != "planned" for _, _, status, _ in PROGRESS)
+        st.progress(built / len(PROGRESS), text=f"{built} of {len(PROGRESS)} pipeline stages working")
         st.dataframe(
             pd.DataFrame([
-                {"Stage": label, "Phase": phase,
-                 "Status": "✅ Built" if phase <= IMPLEMENTED_PHASE else "⏳ Planned"}
-                for _, label, phase in PROGRESS
+                {"Stage": label,
+                 "Status": {"built": "✅ Built", "rule": "✅ Rule-based (LLM agent next)",
+                            "planned": "⏳ Planned"}[status]}
+                for _, label, status, _ in PROGRESS
             ]),
             hide_index=True, width="stretch", height=300,
         )

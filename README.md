@@ -7,6 +7,15 @@ reflects on failed repairs, and opens a PR only after validation.
 
 > ML predicts, RAG retrieves, LLM reasons, agents act, and tests verify.
 
+One codebase serves two tracks:
+
+| Track | Focus | State |
+|---|---|---|
+| **IDT / DevOps** | Risk-aware quality gate, real CI tests, human-approved self-healing loop, Docker, GitHub Actions, reports | **implemented** |
+| **Agentic AI** | RAG retrieval and LLM agents for investigation, root cause and planning | next — plugs into the same `RepairStrategy` interface and loop |
+
+![CI](https://github.com/Lakshay0916/SEM7/actions/workflows/ci.yml/badge.svg)
+
 ## Setup
 
 ```bash
@@ -16,12 +25,24 @@ pip install -r requirements.txt
 cp .env.example .env   # optional; defaults work offline
 ```
 
+Or with Docker (no local Python needed):
+
+```bash
+docker compose up                                # dashboard at http://localhost:8502
+docker compose --profile tools run --rm tests    # test suite inside the container
+docker compose --profile tools run --rm cli python scripts/run_ci.py --scenario failed_first_repair --heal --approve
+```
+
 ## Run
 
 ```bash
 streamlit run ui/app.py                          # dashboard at http://localhost:8502
 python scripts/run_ci.py --list                  # available demo scenarios
 python scripts/run_ci.py --scenario simple_bug   # sandbox -> commit -> diff -> risk -> real tests -> FailureEvent
+python scripts/run_ci.py --scenario failed_first_repair --heal            # propose a fix, stop for approval
+python scripts/run_ci.py --scenario failed_first_repair --heal --approve  # approve every plan up front
+python scripts/ci_gate.py --base origin/main     # risk-aware quality gate on this repo (what CI runs)
+python scripts/export_report.py --latest         # Markdown report of the latest workflow
 pytest                                           # project test suite
 
 # ML risk model (dataset + model are committed; these regenerate them)
@@ -41,11 +62,47 @@ healthy `main` and a feature branch carrying the scenario's buggy commit.
 | 3 | ML risk module (mined from 9 public repos) | done — see `data/risk/EVALUATION.md` |
 | 4 | Workflow state machine + SQLite persistence + redacted logging | done |
 | UI | Streamlit dashboard (Dashboard, Run Pipeline, Workflows, Risk Model) | done (extended each phase) |
-| 5–7 | Investigation, RAG, Root Cause, Solution Planner | todo |
-| 8–11 | Approval, Repair, Testing, Reflection | todo |
-| 12–14 | PR adapter, UI, evaluation | todo |
+| 5, 7 | Investigation, root cause, solution planning | done — **rule-based** `RepairStrategy` (LLM agents next) |
+| 6 | RAG retrieval | todo (Agentic AI) |
+| 8–11 | Human approval, repair on `ai/repair/*`, real re-test, bounded reflection | done |
+| 12 | PR adapter | done — local adapter (GitHub adapter todo) |
+| IDT | Quality gate, Docker, GitHub Actions (Linux + Windows), Markdown reports | done |
 
-## Safety guarantees implemented so far
+## DevOps / IDT pipeline
+
+`.github/workflows/ci.yml` runs on every push and pull request:
+
+| Job | What it does |
+|---|---|
+| Quality gate (Linux) | `scripts/ci_gate.py`: diff vs. base → ML risk score → **full test suite** → gate. Report in the run summary, JSON artifact. |
+| Tests (Windows) | Full suite on Windows (cross-platform paths, encodings, line endings). |
+| Docker | Builds the image, runs the tests inside it, smoke-tests the dashboard's health endpoint. |
+| Self-healing demo | Scenario 3 end to end (fix 1 fails → reflection → fix 2 → PR); uploads the report and PR description. |
+
+**Gate policy** (`app/ci/quality_gate.py`) — tests always run; risk can only add scrutiny:
+FAIL / ERROR / TIMEOUT → **BLOCK** (red check) · tests pass + HIGH risk → **REVIEW** (warning) · otherwise **PASS**.
+Risk never skips tests: the diff-only model is a weak signal (test ROC-AUC 0.60).
+
+## Self-healing loop
+
+```
+FAILED → INVESTIGATING → ROOT_CAUSE_IDENTIFIED → SOLUTION_PROPOSED → WAITING_APPROVAL
+      → (human) APPROVED → REPAIRING (ai/repair/<id>) → TESTING_REPAIR → PASSED → PR_CREATED
+                                                    ↘ REFLECTING → INVESTIGATING …  (max 3 attempts)
+      → (human) REJECTED → re-analyse or stop
+```
+
+- `app/healing/strategy.py` — the `RepairStrategy` interface: `investigate()`, `root_cause()`, `plan()`.
+  These map one-to-one onto the planned Investigation, Root-Cause and Planner agents.
+- `app/healing/rules.py` — today's **rule-based** strategy (no LLM): restore a changed operator first;
+  if tests still fail, restore the implicated function from `main`.
+- `app/healing/loop.py` — strategy-agnostic loop: approval, repair branch, real re-test, reflection, PR.
+- `app/healing/patcher.py` — applies only approved plans; refuses tests/config/dependency edits and ambiguous snippets.
+
+Adding the Agentic AI track means writing an LLM-backed class with the same three methods; the
+approval gate, safety checks, test verification, reflection and PR flow are reused unchanged.
+
+## Safety guarantees
 
 - `GitRepo(actor="ai")` cannot commit/reset/push `main`/`master` and may only
   create branches prefixed `ai/repair/` (`app/git/repo.py`).
@@ -54,6 +111,9 @@ healthy `main` and a feature branch carrying the scenario's buggy commit.
   errors, missing reports and zero-test runs are `TIMEOUT`/`ERROR`.
 - Test targets are passed as argv (no shell) and must stay inside the project.
 - Secrets are read from env only and excluded from `Settings` repr.
+- No repair without a recorded human approval (state machine: only `APPROVED → REPAIRING`).
+- Repairs may not modify tests, CI config or dependency files; each edit must match exactly once.
+- Retries are bounded by `MAX_REPAIR_ATTEMPTS`; PRs are never merged automatically.
 
 ## ML risk module
 
@@ -89,11 +149,16 @@ app/
   risk/mining.py      GitHub Actions history -> labelled, leakage-free dataset
   risk/train.py       models, temporal split, metrics, baselines
   risk/predictor.py   RiskAssessment with explained risk factors
+  ci/quality_gate.py  PASS / REVIEW / BLOCK policy
+  healing/            RepairStrategy interface, rule-based strategy, safe patcher, loop, PR adapter
+  reporting/          Markdown reports (PR body, workflow report, CI gate summary)
   orchestration/      workflow state machine, SQLite store, CI workflow orchestrator
   logging_utils.py    secret-redacting logging, stage timing
 demo_projects/calculator/   controlled demo target
 ui/                         Streamlit dashboard (app.py + views/)
-scripts/                    run_ci.py, mine_ci_data.py, train_risk_model.py
+scripts/                    run_ci.py, ci_gate.py, export_report.py, mine_ci_data.py, train_risk_model.py
+.github/workflows/ci.yml    GitHub Actions pipeline
+Dockerfile, docker-compose.yml
 data/risk/                  repos.json, mined runs/rows, commits.csv, evaluation
 models/risk_model.joblib    trained risk model
 tests/                      unit + safety tests

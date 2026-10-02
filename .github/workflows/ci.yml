@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-gate:
+    name: Tests + risk-aware quality gate (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history: the gate diffs against the base commit
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Quality gate (diff → ML risk → real tests → PASS / REVIEW / BLOCK)
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+          PR_FLAG: ${{ github.event_name == 'pull_request' && '--pull-request' || '' }}
+        run: |
+          python scripts/ci_gate.py --base "$BASE" $PR_FLAG \
+            --summary-file "$GITHUB_STEP_SUMMARY" --json gate.json
+
+      - name: Upload gate result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-gate
+          path: gate.json
+          if-no-files-found: ignore
+
+  tests-windows:
+    name: Tests (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run tests
+        run: python -m pytest -q -p no:cacheprovider
+
+  docker:
+    name: Docker build + tests in container
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t sem7-selfheal:ci .
+      - name: Run tests inside the container
+        run: docker run --rm sem7-selfheal:ci python -m pytest -q -p no:cacheprovider
+      - name: Smoke-test the dashboard container
+        run: |
+          docker run -d --name dash -p 8502:8502 sem7-selfheal:ci
+          for i in $(seq 1 30); do curl -sf http://localhost:8502/_stcore/health && break; sleep 2; done
+          curl -sf http://localhost:8502/_stcore/health
+          docker rm -f dash
+
+  self-healing-demo:
+    name: Self-healing demo (scenario 3)
+    runs-on: ubuntu-latest
+    needs: quality-gate
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Break → investigate → approve → repair → reflect → re-test → PR
+        # --approve records the CI run as the approver for this demo only; the dashboard requires a human click.
+        run: python scripts/run_ci.py --scenario failed_first_repair --heal --approve
+      - name: Export workflow report
+        run: |
+          python scripts/export_report.py --latest --out healing-report.md
+          cat healing-report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload report and PR description
+        uses: actions/upload-artifact@v4
+        with:
+          name: self-healing-demo
+          path: |
+            healing-report.md
+            workspace/runs/*/PR_*.md

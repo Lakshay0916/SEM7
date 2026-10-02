@@ -76,6 +76,8 @@ div[class*="st-key-step-plan"] { border-left-color: #8b95a7 !important; }
 .progress .p.done { background: rgba(34,163,90,0.16); border-color: rgba(34,163,90,0.55); }
 .progress .p.fail { background: rgba(214,69,69,0.16); border-color: rgba(214,69,69,0.6); }
 .progress .p.plan { border-style: dashed; opacity: .55; }
+.progress .p.todo { opacity: .75; }
+.progress .p.wait { background: rgba(225,154,23,0.18); border-color: rgba(225,154,23,0.65); }
 
 /* Risk gauge */
 .gauge { margin: .3rem 0 .35rem 0; }
@@ -150,8 +152,8 @@ def step_header(num: int | str, title: str, status: str, label: str, what: str, 
 
 
 def progress_bar(items: list[tuple[str, str]]) -> None:
-    """items: (label, state) with state in done | fail | plan."""
-    icon = {"done": "✓ ", "fail": "✗ ", "plan": ""}
+    """items: (label, state) with state in done | fail | wait | todo | plan."""
+    icon = {"done": "✓ ", "fail": "✗ ", "plan": "", "todo": "", "wait": "⏸ "}
     cells = "".join(f'<div class="p {s}">{icon[s]}{esc(lbl)}</div>' for lbl, s in items)
     st.markdown(f'<div class="progress">{cells}</div>', unsafe_allow_html=True)
 
@@ -175,10 +177,10 @@ def risk_gauge(score: float, medium: float, high: float) -> None:
     )
 
 
-def upcoming_cards(items: list[tuple[str, int, str]]) -> None:
+def upcoming_cards(items: list[tuple[str, str, str]]) -> None:
     cards = "".join(
-        f'<div><span class="ph">PHASE {ph}</span><b>⏳ {esc(t)}</b><small>{esc(d)}</small></div>'
-        for t, ph, d in items
+        f'<div><span class="ph">{esc(tag.upper())}</span><b>⏳ {esc(t)}</b><small>{esc(d)}</small></div>'
+        for t, tag, d in items
     )
     st.markdown(f'<div class="upcoming">{cards}</div>', unsafe_allow_html=True)
 

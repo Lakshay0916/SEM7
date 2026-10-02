@@ -1,33 +1,194 @@
-"""Step-by-step rendering of one workflow: each step explains itself, then shows its real output."""
+"""Step-by-step rendering of one workflow: each step explains itself, then shows its real output.
+
+Steps 1-5 are the CI run; step 6 is the interactive, human-approved self-healing loop;
+step 7 is the full audit trail.
+"""
 
 from __future__ import annotations
+
+import difflib
 
 import pandas as pd
 import streamlit as st
 
+from app.ci.quality_gate import evaluate_gate
+from app.healing.loop import abort, apply_and_verify, decide, propose_fix, repair_branch
+from app.healing.rules import RuleBasedStrategy
 from app.models.schemas import PipelineRun, TestStatus
+from app.models.schemas import WorkflowState as S
 from ui.common import RISK_BADGE, TEST_BADGE, get_predictor, get_store, try_ai_commit_to_main
 from ui.content import PROGRESS, STEPS, UPCOMING
 from ui.style import kv_tiles, progress_bar, risk_gauge, step_header, upcoming_cards
 
+GATE_BADGE = {"PASS": "✅ PASS", "REVIEW": "🟠 REVIEW", "BLOCK": "⛔ BLOCK"}
 
-def _progress(run: PipelineRun) -> None:
+
+def strategy() -> RuleBasedStrategy:
+    return RuleBasedStrategy()
+
+
+# --------------------------------------------------------------------------- progress strip
+
+
+def _progress(store, wf_id: str, run: PipelineRun) -> None:
+    reached = {e["state"] for e in store.events(wf_id) if e["state"]}
+    state = store.get_workflow(wf_id)["state"]
     failed = run.test_report.status != TestStatus.PASS
     items = []
-    for step, label, _phase in PROGRESS:
-        if step == "risk" and run.risk is None:
+    for key, label, status, marker in PROGRESS:
+        if status == "planned":
+            items.append((label, "plan"))
+        elif key == "risk" and run.risk is None:
             items.append((label + " (skipped)", "plan"))
-        elif step == "tests":
+        elif key == "tests":
             items.append((label, "fail" if failed else "done"))
-        elif step:
+        elif key == "approval" and state == "WAITING_APPROVAL":
+            items.append((label, "wait"))
+        elif key in ("sandbox", "diff") or marker in reached:
             items.append((label, "done"))
         else:
-            items.append((label, "plan"))
+            items.append((label, "todo"))
     progress_bar(items)
-    st.caption(
-        "✓ done · ✗ tests failed (hand-off point to the agents) · dashed = later phase, not built yet"
-        if failed else "✓ done · tests passed, so no investigation or repair is needed · dashed = later phase"
-    )
+    st.caption("✓ reached · ✗ tests failed · ⏸ waiting for you · plain = not reached in this run · "
+               "dashed = planned (Agentic AI phase)")
+
+
+# --------------------------------------------------------------------------- self-healing
+
+
+def _diff(original: str, replacement: str, path: str) -> str:
+    return "".join(difflib.unified_diff(original.splitlines(keepends=True), replacement.splitlines(keepends=True),
+                                        fromfile=f"a/{path}", tofile=f"b/{path}"))
+
+
+def _by_attempt(store, wf_id: str, kind: str) -> dict[int, dict]:
+    return {a["attempt"]: a["payload"] for a in store.artifacts(wf_id, kind)}
+
+
+def _attempt_block(store, wf_id: str, n: int) -> None:
+    inv = _by_attempt(store, wf_id, "investigation").get(n)
+    rc = _by_attempt(store, wf_id, "root_cause").get(n)
+    plan = _by_attempt(store, wf_id, "repair_plan").get(n)
+    approval = _by_attempt(store, wf_id, "approval").get(n)
+    attempt = _by_attempt(store, wf_id, "repair_attempt").get(n)
+    test = _by_attempt(store, wf_id, "test_run").get(n)
+    refl = _by_attempt(store, wf_id, "reflection").get(n)
+
+    with st.container(border=True, key=f"attempt-{n}"):
+        st.markdown(f"##### 🔁 Attempt {n}" + (f" · `{plan['level']}`" if plan else ""))
+        a, b = st.columns(2)
+        with a:
+            st.markdown("**🔎 Investigation** — what failed")
+            if inv:
+                st.markdown(inv["failure_summary"])
+                st.markdown("\n".join(f"- {e.removeprefix('FACT: ')}" for e in inv["evidence"]))
+                if inv["initial_hypotheses"]:
+                    st.caption("Hypotheses (not facts): " + " · ".join(
+                        h.removeprefix("HYPOTHESIS: ") for h in inv["initial_hypotheses"]))
+        with b:
+            st.markdown("**🧠 Root cause** — why")
+            if rc:
+                st.markdown(rc["root_cause"])
+                st.progress(rc["confidence"], text=f"Confidence {rc['confidence']:.0%}")
+                for e in [x for x in rc["evidence"] if not x.startswith("FACT:")][:4]:
+                    st.markdown(f"- {e}")
+                for alt in rc["alternative_hypotheses"]:
+                    st.caption(f"Also considered: {alt}")
+
+        if plan:
+            st.markdown(f"**🛠️ Proposed fix:** {plan['summary']}  ·  _strategy `{plan['strategy']}` "
+                        f"({plan['strategy_kind']})_")
+            for ch in plan["changes"]:
+                st.caption(f"`{ch['file']}` — {ch['description']}")
+                st.code(_diff(ch["original"], ch["replacement"], ch["file"]), language="diff")
+            c1, c2 = st.columns(2)
+            c1.markdown("**Risks of this fix**\n" + "\n".join(f"- {r}" for r in plan["risks"]))
+            c2.markdown(f"**Tests to run**\n" + "\n".join(f"- `{t}`" for t in plan["tests"])
+                        + f"\n\n**Rollback:** {plan['rollback_plan']}")
+
+        if approval:
+            verdict = "✅ Approved" if approval["approved"] else "🚫 Rejected"
+            st.markdown(f"**👤 Human decision:** {verdict} by **{approval['reviewer']}**"
+                        + (f" — _{approval['comment']}_" if approval["comment"] else ""))
+        if attempt:
+            with st.expander(f"🌿 Repair commit `{attempt['commit_sha'][:10]}` on `{attempt['branch']}`"):
+                st.code(attempt["patch"], language="diff")
+        if test:
+            badge = TEST_BADGE[test["status"]]
+            st.markdown(f"**🧪 Re-test (real pytest):** {badge} — {test['tests_passed']} passed, "
+                        f"{test['tests_failed']} failed, {test['tests_errored']} errors")
+        if refl:
+            st.info(f"🪞 **Reflection:** {refl['summary']}"
+                    + (f"  \nStill failing: {', '.join(f'`{t}`' for t in refl['still_failing'])}"
+                       if refl["still_failing"] else "")
+                    + (f"  \n⚠️ Regressions: {', '.join(f'`{t}`' for t in refl['regressions'])}"
+                       if refl["regressions"] else ""))
+
+
+def _healing(store, wf_id: str) -> None:
+    wf = store.get_workflow(wf_id)
+    state = S(wf["state"])
+    attempts = sorted(_by_attempt(store, wf_id, "investigation"))
+    status, label = {
+        S.PR_CREATED: ("done", "✓ Repaired · PR opened"),
+        S.ABORTED: ("fail", "✗ Stopped - human needed"),
+        S.WAITING_APPROVAL: ("warn", "⏸ Waiting for your approval"),
+        S.REJECTED: ("warn", "Plan rejected"),
+        S.FAILED: ("warn", "Ready to investigate"),
+    }.get(state, ("warn", state.value))
+
+    with st.container(border=True, key=f"step-{status}-6"):
+        s = STEPS["heal"]
+        step_header(6, s["title"], status, label, s["what"], s["why"])
+
+        if state == S.FAILED and not attempts:
+            st.write("No analysis yet for this failure.")
+            if st.button("🩺 Investigate & propose a fix", type="primary", key=f"start-{wf_id}"):
+                propose_fix(store, wf_id, strategy())
+                st.rerun()
+
+        for n in attempts:
+            _attempt_block(store, wf_id, n)
+
+        if state == S.WAITING_APPROVAL:
+            with st.container(border=True, key="approval-box"):
+                st.markdown("#### ⏸ Your decision")
+                st.write("Nothing has been changed yet. Approving applies **only** the diff above, on branch "
+                         f"`{repair_branch(wf_id)}` (never `main`), then re-runs the full test suite.")
+                c1, c2 = st.columns([1, 2])
+                reviewer = c1.text_input("Reviewer name", value="reviewer", key=f"rev-{wf_id}")
+                comment = c2.text_input("Comment (optional)", key=f"com-{wf_id}")
+                b1, b2, _ = st.columns([1, 1, 2])
+                if b1.button("✅ Approve & apply", type="primary", key=f"approve-{wf_id}", width="stretch"):
+                    decide(store, wf_id, True, reviewer or "reviewer", comment)
+                    with st.spinner("Applying on the repair branch and running the real tests…"):
+                        apply_and_verify(store, wf_id, strategy=strategy())
+                    st.rerun()
+                if b2.button("🚫 Reject", key=f"reject-{wf_id}", width="stretch"):
+                    decide(store, wf_id, False, reviewer or "reviewer", comment)
+                    st.rerun()
+        elif state == S.REJECTED:
+            st.warning("You rejected the proposed fix. No code was changed.")
+            b1, b2, _ = st.columns([1, 1, 2])
+            if b1.button("🔁 Re-analyse", key=f"reanalyse-{wf_id}", width="stretch"):
+                propose_fix(store, wf_id, strategy())
+                st.rerun()
+            if b2.button("⏹ Stop here", key=f"abort-{wf_id}", width="stretch"):
+                abort(store, wf_id, "Stopped by reviewer after rejection")
+                st.rerun()
+        elif state == S.PR_CREATED:
+            pr = store.latest(wf_id, "pull_request")
+            st.success(f"🎉 Fix validated by real tests. Pull request opened ({pr['provider']}, **not merged**): "
+                       f"`{pr['head_branch']}` → `{pr['base_branch']}`")
+            with st.expander("📄 Pull request description"):
+                st.markdown(pr["body"])
+            st.caption(f"Saved at `{pr['url']}`")
+        elif state == S.ABORTED:
+            last = [e for e in store.events(wf_id) if e["state"] == "ABORTED"]
+            st.error(f"⏹ {last[-1]['message'] if last else 'Workflow stopped.'}")
+
+
+# --------------------------------------------------------------------------- main view
 
 
 def render_workflow(wf_id: str) -> None:
@@ -42,7 +203,7 @@ def render_workflow(wf_id: str) -> None:
 
     st.markdown(f"### Workflow `{wf_id}`")
     st.caption(f"Scenario `{wf['scenario']}` · final state **{wf['state']}** · sandbox `{wf['repo_path']}`")
-    _progress(run)
+    _progress(store, wf_id, run)
 
     # 1. Sandbox + commit ------------------------------------------------------
     with st.container(border=True, key="step-done-1"):
@@ -106,8 +267,9 @@ def render_workflow(wf_id: str) -> None:
                     st.dataframe(pd.DataFrame(r.features.items(), columns=["Feature", "Value"]),
                                  hide_index=True, width="stretch")
 
-    # 4. Tests ---------------------------------------------------------------------
+    # 4. Tests + quality gate --------------------------------------------------------
     t = run.test_report
+    gate = evaluate_gate(t, r)
     st_status = "done" if t.status == TestStatus.PASS else "fail"
     with st.container(border=True, key=f"step-{st_status}-4"):
         s = STEPS["tests"]
@@ -117,8 +279,10 @@ def render_workflow(wf_id: str) -> None:
         cols[1].metric("Tests run", t.tests_run)
         cols[2].metric("Passed", t.tests_passed)
         cols[3].metric("Failed", t.tests_failed)
-        cols[4].metric("Duration", f"{t.duration_seconds:.2f}s")
-        st.caption(f"Command `{t.command}` · pytest exit code `{t.exit_code}`")
+        cols[4].metric("Quality gate", GATE_BADGE[gate.status.value],
+                       help="Tests always run. FAIL → BLOCK; tests pass + HIGH risk → REVIEW; else PASS")
+        st.caption(f"Command `{t.command}` · pytest exit code `{t.exit_code}` · {t.duration_seconds:.2f}s · "
+                   f"gate: {gate.reasons[0]}")
         for n in t.notes:
             st.warning(n)
         for f in t.failures:
@@ -136,16 +300,21 @@ def render_workflow(wf_id: str) -> None:
             step_header(5, s["title"], "fail", f"✗ {len(ev.failed_tests)} failing test(s)", s["what"], s["why"])
             st.markdown("**Failing tests:** " + ", ".join(f"`{x}`" for x in ev.failed_tests))
             st.markdown("**Changed files:** " + ", ".join(f"`{x}`" for x in ev.changed_files))
-            with st.expander("FailureEvent JSON (exact input for the Investigation Agent)"):
+            with st.expander("FailureEvent JSON (exact input to the self-healing loop)"):
                 st.json(ev.model_dump(mode="json", exclude={"test_report", "diff"}))
         else:
             step_header(5, s["title"], "done", "Not needed - tests passed", s["what"], s["why"])
             st.success("All tests passed, so there is nothing to investigate or repair. The workflow ends here.")
 
-    # 6. Recorded -------------------------------------------------------------------
-    with st.container(border=True, key="step-done-6"):
+    # 6. Self-healing -------------------------------------------------------------
+    if failed:
+        _healing(store, wf_id)
+
+    # 7. Recorded -------------------------------------------------------------------
+    with st.container(border=True, key="step-done-7"):
         s = STEPS["record"]
-        step_header(6, s["title"], "done", f"✓ Recorded · {len(store.events(wf_id))} events", s["what"], s["why"])
+        step_header(7 if failed else 6, s["title"], "done", f"✓ Recorded · {len(store.events(wf_id))} events",
+                    s["what"], s["why"])
         ev = pd.DataFrame(store.events(wf_id))
         ev["ts"] = ev["ts"].str[11:19]
         ev["state"] = ev["state"].fillna("(log only)")
@@ -153,10 +322,10 @@ def render_workflow(wf_id: str) -> None:
                      hide_index=True, width="stretch")
         with st.expander("Stored artifacts (raw JSON)"):
             for a in store.artifacts(wf_id):
-                st.markdown(f"**{a['kind']}** · {a['created_at'][:19]}")
+                st.markdown(f"**{a['kind']}** (attempt {a['attempt']}) · {a['created_at'][:19]}")
                 st.json(a["payload"], expanded=False)
 
-    # Safety + what's next ---------------------------------------------------------
+    # Safety + roadmap ---------------------------------------------------------------
     with st.container(border=True, key="safety-card"):
         st.markdown("#### 🛡️ Safety check — can the AI write to `main`?")
         st.write("This tries an **AI-actor** commit on `main` in this workflow's sandbox. The Git guard "
@@ -165,6 +334,6 @@ def render_workflow(wf_id: str) -> None:
         if st.button("Attempt AI commit to main", key=f"guard-{wf_id}"):
             st.code(try_ai_commit_to_main(wf["repo_path"]), language="text")
 
-    st.markdown("#### What happens next" + (" (after a failure)" if failed else ""))
-    st.caption("These stages pick up the FailureEvent above. They are planned for later phases and not built yet.")
+    st.markdown("#### Roadmap")
+    st.caption("Still to come. The Agentic AI items plug into the same loop shown above.")
     upcoming_cards(UPCOMING)
