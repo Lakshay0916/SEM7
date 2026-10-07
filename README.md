@@ -95,6 +95,7 @@ healthy `main` and a feature branch carrying the scenario's buggy commit.
 | 8–11 | Human approval, repair on `ai/repair/*`, real re-test, bounded reflection | done |
 | 12 | PR adapter | done — local adapter (GitHub adapter todo) |
 | IDT | Quality gate, 3-container Docker stack (ui + api + PostgreSQL), GitHub Actions (Linux + Windows + compose e2e), Markdown reports | done |
+| IDT | Deployment on AWS EC2 (AWS CLI + Docker Compose + Caddy HTTPS) | done — see `docs/DEPLOY.md` |
 
 ## DevOps / IDT pipeline
 
@@ -110,6 +111,11 @@ healthy `main` and a feature branch carrying the scenario's buggy commit.
 **Gate policy** (`app/ci/quality_gate.py`) — tests always run; risk can only add scrutiny:
 FAIL / ERROR / TIMEOUT → **BLOCK** (red check) · tests pass + HIGH risk → **REVIEW** (warning) · otherwise **PASS**.
 Risk never skips tests: the diff-only model is a weak signal (test ROC-AUC 0.60).
+
+## Deployment (AWS EC2)
+
+The same compose stack runs on one EC2 instance behind Caddy (HTTPS + login), created with plain AWS CLI scripts in `deploy/`:
+`deploy/provision.sh` → `deploy/deploy.sh <ip>` → `deploy/teardown.sh`. Full guide: [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Self-healing loop
 
