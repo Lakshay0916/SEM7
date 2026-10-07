@@ -16,3 +16,6 @@ workspace/
 .DS_Store
 .vscode/
 .idea/
+
+# Server-generated web login (deploy/deploy.sh)
+deploy/auth.caddy

@@ -1,0 +1,38 @@
+# Production overlay for the EC2 host. Used together with docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build --wait
+#
+# Differences from local runs:
+#   - ui and api are no longer published on the host; only Caddy listens (80/443).
+#   - Caddy terminates HTTPS (automatic Let's Encrypt cert) and asks for a login.
+#   - SITE_HOST and POSTGRES_PASSWORD come from the server's .env (see deploy/deploy.sh).
+
+services:
+  api:
+    ports: !reset []
+
+  ui:
+    ports: !reset []
+
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      SITE_HOST: ${SITE_HOST:?set SITE_HOST in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/auth.caddy:/etc/caddy/auth.caddy:ro   # generated on the server, never committed
+      - caddy_data:/data                               # TLS certificates
+      - caddy_config:/config
+    depends_on:
+      ui:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

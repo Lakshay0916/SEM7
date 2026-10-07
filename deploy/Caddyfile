@@ -1,0 +1,17 @@
+# Reverse proxy in front of the stack. SITE_HOST is "<public-ip-with-dashes>.sslip.io",
+# a free wildcard DNS name that resolves to the server, so Let's Encrypt can issue a cert.
+#
+#   https://{SITE_HOST}       -> Streamlit UI
+#   https://api.{SITE_HOST}   -> FastAPI (Swagger docs at /docs)
+#
+# Both require the login defined in auth.caddy (written by deploy/deploy.sh).
+
+{$SITE_HOST} {
+	import /etc/caddy/auth.caddy
+	reverse_proxy ui:8502
+}
+
+api.{$SITE_HOST} {
+	import /etc/caddy/auth.caddy
+	reverse_proxy api:8000
+}
