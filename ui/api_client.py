@@ -71,6 +71,12 @@ class ApiClient:
 
     def risk_evaluation(self) -> dict: return self._req("GET", "/risk/evaluation")
 
+    # assistant
+    def assistant_info(self) -> dict: return self._req("GET", "/assistant")
+
+    def chat(self, message: str, history: list[dict], workflow_id: str | None = None) -> dict:
+        return self._req("POST", "/chat", {"message": message, "history": history, "workflow_id": workflow_id})
+
 
 @st.cache_resource
 def get_api() -> ApiClient:

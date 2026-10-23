@@ -39,7 +39,8 @@ class Settings:
     repair_branch_prefix: str = "ai/repair/"
 
     llm_provider: str = field(default_factory=lambda: os.getenv("LLM_PROVIDER") or "heuristic")
-    llm_model: str = field(default_factory=lambda: os.getenv("LLM_MODEL") or "claude-sonnet-5-5")
+    llm_model: str = field(default_factory=lambda: os.getenv("LLM_MODEL") or "claude-opus-5-5")
+    llm_effort: str = field(default_factory=lambda: os.getenv("LLM_EFFORT") or "medium")
     llm_api_key: str = field(default_factory=lambda: os.getenv("LLM_API_KEY", ""), repr=False)
     github_token: str = field(default_factory=lambda: os.getenv("GITHUB_TOKEN", ""), repr=False)
     repository_url: str = field(default_factory=lambda: os.getenv("REPOSITORY_URL", ""))

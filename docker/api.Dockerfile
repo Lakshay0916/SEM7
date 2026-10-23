@@ -21,6 +21,9 @@ COPY demo_projects/ demo_projects/
 COPY models/ models/
 COPY data/ data/
 COPY scripts/ scripts/
+# Docs the project assistant answers from (app/assistant/faq.md comes with app/).
+COPY README.md README.md
+COPY docs/DEPLOY.md docs/DEPLOY.md
 COPY tests/ tests/
 
 RUN useradd --create-home --uid 1000 sem7 \

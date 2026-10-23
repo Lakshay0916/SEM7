@@ -40,7 +40,8 @@ def isolated_backend(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "module", ["ui.views.dashboard", "ui.views.how_it_works", "ui.views.workflows", "ui.views.risk_model"]
+    "module", ["ui.views.dashboard", "ui.views.how_it_works", "ui.views.workflows", "ui.views.risk_model",
+               "ui.views.assistant"]
 )
 def test_page_renders_without_errors(module):
     at = _page(module).run()
@@ -92,3 +93,20 @@ def test_ui_reports_unreachable_backend(monkeypatch):
     at = _page("ui.views.dashboard").run()
     assert not at.exception
     assert any("Backend API unavailable" in e.value for e in at.error)
+
+
+def test_assistant_answers_typed_and_suggested_questions():
+    at = _page("ui.views.assistant").run()
+    at.chat_input[0].set_value("How does the quality gate decide?").run()
+    assert not at.exception, at.exception
+    history = at.session_state["assistant_history"]
+    assert [m["role"] for m in history] == ["user", "assistant"]
+    assert "BLOCK" in history[1]["content"] and history[1]["sources"]
+
+    # Suggested-question buttons only show on an empty chat; clicking one asks it on the next run.
+    at.session_state["assistant_history"] = []
+    at.run()
+    at.button(key="suggest-0").click().run()
+    at.run()
+    assert not at.exception, at.exception
+    assert len(at.session_state["assistant_history"]) == 2

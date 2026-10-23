@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from app.assistant.bot import Assistant
+from app.assistant.knowledge import KnowledgeBase
 from app.ci.scenarios import SCENARIOS
 from app.config import PROJECT_ROOT
 from app.git.safety import try_ai_commit_to_main
@@ -51,6 +54,15 @@ def get_strategy() -> RuleBasedStrategy:
     return RuleBasedStrategy()
 
 
+@lru_cache
+def get_knowledge() -> KnowledgeBase:
+    return KnowledgeBase.load()
+
+
+def get_assistant() -> Assistant:
+    return Assistant(get_store(), get_predictor(), kb=get_knowledge())
+
+
 @app.exception_handler(KeyError)
 def _not_found(_, exc: KeyError):
     return JSONResponse(status_code=404, content={"detail": str(exc).strip("'")})
@@ -77,6 +89,18 @@ class Decision(BaseModel):
 
 class AbortRequest(BaseModel):
     reason: str = Field(default="Stopped by reviewer", max_length=500)
+
+
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=20000)
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=2000, examples=["How does the quality gate decide?"])
+    history: list[ChatTurn] = Field(default_factory=list, max_length=40,
+                                    description="Earlier turns of this conversation, oldest first")
+    workflow_id: str | None = Field(default=None, description="Optional workflow to ask about")
 
 
 def _summary(store: Store, wf_id: str) -> dict:
@@ -193,3 +217,19 @@ def risk_evaluation() -> dict:
         caveats = text.split("## Caveats", 1)[1]
     return {"evaluation": load("evaluation.json"), "mining_summary": load("mining_summary.json"),
             "caveats": caveats}
+
+
+# --------------------------------------------------------------------------- assistant
+
+
+@app.get("/assistant", tags=["assistant"])
+def assistant_info() -> dict:
+    """Which answer mode is active (offline heuristic or Claude) and suggested questions."""
+    return get_assistant().info()
+
+
+@app.post("/chat", tags=["assistant"])
+def chat(req: ChatRequest) -> dict:
+    """Answer a question about the project or a workflow run. Read-only: never changes anything."""
+    history = [t.model_dump() for t in req.history]
+    return get_assistant().reply(req.message, history, req.workflow_id).to_dict()

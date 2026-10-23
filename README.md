@@ -96,6 +96,7 @@ healthy `main` and a feature branch carrying the scenario's buggy commit.
 | 12 | PR adapter | done — local adapter (GitHub adapter todo) |
 | IDT | Quality gate, 3-container Docker stack (ui + api + PostgreSQL), GitHub Actions (Linux + Windows + compose e2e), Markdown reports | done |
 | IDT | Deployment on AWS EC2 (AWS CLI + Docker Compose + Caddy HTTPS) | done — see `docs/DEPLOY.md` |
+| UI | Project assistant (chatbot): answers questions about the project and workflow runs | done — offline by default, Claude optional |
 
 ## DevOps / IDT pipeline
 
@@ -111,6 +112,16 @@ healthy `main` and a feature branch carrying the scenario's buggy commit.
 **Gate policy** (`app/ci/quality_gate.py`) — tests always run; risk can only add scrutiny:
 FAIL / ERROR / TIMEOUT → **BLOCK** (red check) · tests pass + HIGH risk → **REVIEW** (warning) · otherwise **PASS**.
 Risk never skips tests: the diff-only model is a weak signal (test ROC-AUC 0.60).
+
+## Project assistant (chatbot)
+
+The **Assistant** page (and `POST /chat`) answers questions about the project and your workflow runs.
+It is read-only: it never runs pipelines, approves fixes or changes code.
+
+- **Knowledge:** a curated FAQ (`app/assistant/faq.md`) plus this README, `docs/DEPLOY.md` and the risk-model evaluation, split into sections.
+- **Live data:** workflow counts and recent runs from the database; pick a workflow to ask "why did this run fail?" or "what happens next?".
+- **Offline mode (default, `LLM_PROVIDER=heuristic`):** TF-IDF search picks the best-matching answer and lists its sources; off-topic questions get "I don't know" instead of a weak match.
+- **Claude mode (`LLM_PROVIDER=anthropic`, `LLM_API_KEY=...`, `LLM_MODEL` default `claude-opus-5-5`):** Claude writes the answer grounded in the whole knowledge base (prompt-cached system prompt) and the live data for the question. API errors or refusals fall back to the offline answer.
 
 ## Deployment (AWS EC2)
 
