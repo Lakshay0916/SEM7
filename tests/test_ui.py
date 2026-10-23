@@ -40,8 +40,7 @@ def isolated_backend(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "module", ["ui.views.dashboard", "ui.views.how_it_works", "ui.views.workflows", "ui.views.risk_model",
-               "ui.views.assistant"]
+    "module", ["ui.views.dashboard", "ui.views.how_it_works", "ui.views.workflows", "ui.views.risk_model"]
 )
 def test_page_renders_without_errors(module):
     at = _page(module).run()
@@ -95,18 +94,36 @@ def test_ui_reports_unreachable_backend(monkeypatch):
     assert any("Backend API unavailable" in e.value for e in at.error)
 
 
-def test_assistant_answers_typed_and_suggested_questions():
-    at = _page("ui.views.assistant").run()
-    at.chat_input[0].set_value("How does the quality gate decide?").run()
+def _chat_panel() -> AppTest:
+    def script():
+        import sys
+        from pathlib import Path
+
+        sys.path.insert(0, str(Path.cwd()))
+        from ui.chat_widget import chat_panel
+
+        chat_panel()
+
+    return AppTest.from_function(script, default_timeout=120)
+
+
+def test_app_shell_mounts_the_floating_assistant():
+    from pathlib import Path
+
+    at = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "ui" / "app.py"), default_timeout=120).run()
+    assert not at.exception, at.exception
+
+
+def test_chat_panel_answers_typed_and_suggested_questions():
+    at = _chat_panel().run()
+    at.chat_input(key="chat_input").set_value("How does the quality gate decide?").run()
     assert not at.exception, at.exception
     history = at.session_state["assistant_history"]
     assert [m["role"] for m in history] == ["user", "assistant"]
     assert "BLOCK" in history[1]["content"] and history[1]["sources"]
 
-    # Suggested-question buttons only show on an empty chat; clicking one asks it on the next run.
-    at.session_state["assistant_history"] = []
-    at.run()
-    at.button(key="suggest-0").click().run()
-    at.run()
+    at.button(key="chat_clear").click().run()
+    assert at.session_state["assistant_history"] == []
+    at.button(key="suggest-0").click().run()  # suggestions show on an empty chat
     assert not at.exception, at.exception
     assert len(at.session_state["assistant_history"]) == 2

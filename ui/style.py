@@ -114,6 +114,15 @@ div[class*="st-key-step-plan"] { border-left-color: #8b95a7 !important; }
 .brand small { display: block; opacity: .7; font-size: .78rem; line-height: 1.45; margin-top: .25rem; }
 
 code { font-size: .86em; }
+
+/* Floating assistant: chat button pinned bottom-right on every page (ui/chat_widget.py) */
+.st-key-chat_fab { position: fixed !important; right: 1.6rem; bottom: 1.4rem; z-index: 999990;
+  width: auto !important; }
+.st-key-chat_fab button { border-radius: 999px; padding: .62rem 1.15rem; border: none; color: #fff;
+  font-weight: 700; background: linear-gradient(135deg, #2a78d6, #7c5cf0);
+  box-shadow: 0 8px 24px rgba(42,120,214,0.42); }
+.st-key-chat_fab button:hover { color: #fff; filter: brightness(1.08); }
+div[data-testid="stPopoverBody"]:has(.st-key-chat_panel) { width: min(440px, 92vw); max-width: 92vw; }
 </style>
 """
 

@@ -115,11 +115,11 @@ Risk never skips tests: the diff-only model is a weak signal (test ROC-AUC 0.60)
 
 ## Project assistant (chatbot)
 
-The **Assistant** page (and `POST /chat`) answers questions about the project and your workflow runs.
+The floating **Ask the assistant** button (bottom-right on every page; also `POST /chat`) opens a chat that answers questions about the project and your workflow runs.
 It is read-only: it never runs pipelines, approves fixes or changes code.
 
 - **Knowledge:** a curated FAQ (`app/assistant/faq.md`) plus this README, `docs/DEPLOY.md` and the risk-model evaluation, split into sections.
-- **Live data:** workflow counts and recent runs from the database; pick a workflow to ask "why did this run fail?" or "what happens next?".
+- **Live data:** workflow counts and recent runs from the database; pick a workflow in the chat panel (it defaults to the run open on Run Pipeline) to ask "why did this run fail?" or "what happens next?".
 - **Offline mode (default, `LLM_PROVIDER=heuristic`):** TF-IDF search picks the best-matching answer and lists its sources; off-topic questions get "I don't know" instead of a weak match.
 - **Claude mode (`LLM_PROVIDER=anthropic`, `LLM_API_KEY=...`, `LLM_MODEL` default `claude-opus-5-5`):** Claude writes the answer grounded in the whole knowledge base (prompt-cached system prompt) and the live data for the question. API errors or refusals fall back to the offline answer.
 

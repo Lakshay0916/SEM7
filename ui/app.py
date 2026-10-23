@@ -8,7 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import streamlit as st  # noqa: E402
 
 from ui.style import inject_css, sidebar_brand  # noqa: E402
-from ui.views import assistant, dashboard, how_it_works, risk_model, run_pipeline, workflows  # noqa: E402
+from ui.chat_widget import render_chat_widget  # noqa: E402
+from ui.views import dashboard, how_it_works, risk_model, run_pipeline, workflows  # noqa: E402
 
 st.set_page_config(page_title="SEM7 Self-Healing CI/CD", page_icon="🛠️", layout="wide")
 inject_css()
@@ -19,7 +20,6 @@ pages = {
     "run": st.Page(run_pipeline.render, title="Run Pipeline", icon="▶️", url_path="run"),
     "workflows": st.Page(workflows.render, title="Workflow History", icon="🧭", url_path="workflows"),
     "risk": st.Page(risk_model.render, title="Risk Model", icon="📈", url_path="risk"),
-    "assistant": st.Page(assistant.render, title="Assistant", icon="💬", url_path="assistant"),
 }
 st.session_state["_pages"] = pages  # lets pages link to each other
 
@@ -27,8 +27,8 @@ nav = st.navigation({
     "Overview": [pages["dashboard"], pages["how-it-works"]],
     "Pipeline": [pages["run"], pages["workflows"]],
     "Models": [pages["risk"]],
-    "Help": [pages["assistant"]],
 })
 sidebar_brand()
 st.sidebar.caption("🌓 Light / dark: **⋮ menu → Settings → Theme** (follows your system by default).")
+render_chat_widget()  # floating assistant, bottom-right on every page
 nav.run()
