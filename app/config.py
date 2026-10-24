@@ -43,11 +43,19 @@ class Settings:
     llm_effort: str = field(default_factory=lambda: os.getenv("LLM_EFFORT") or "medium")
     llm_api_key: str = field(default_factory=lambda: os.getenv("LLM_API_KEY", ""), repr=False)
     github_token: str = field(default_factory=lambda: os.getenv("GITHUB_TOKEN", ""), repr=False)
+
+    # Self-healing analysis: "rules" (deterministic, default - CI uses this) or "agents" (ADK + CrewAI on Gemini)
+    repair_strategy: str = field(default_factory=lambda: os.getenv("REPAIR_STRATEGY") or "rules")
+    agent_model: str = field(default_factory=lambda: os.getenv("AGENT_MODEL") or "gemini-3.1-flash-lite")
+    agent_fallback: bool = field(default_factory=lambda: os.getenv("AGENT_FALLBACK", "1") not in ("0", "false", "no"))
+    google_api_key: str = field(default_factory=lambda: os.getenv("GOOGLE_API_KEY", ""), repr=False)
+    gemini_api_key: str = field(default_factory=lambda: os.getenv("GEMINI_API_KEY", ""), repr=False)
     repository_url: str = field(default_factory=lambda: os.getenv("REPOSITORY_URL", ""))
 
     def secret_values(self) -> list[str]:
         """Non-empty secret values, used by the log redaction filter."""
-        return [s for s in (self.llm_api_key, self.github_token) if s]
+        return list(dict.fromkeys(s for s in (self.llm_api_key, self.github_token, self.google_api_key,
+                                              self.gemini_api_key) if s))
 
 
 settings = Settings()

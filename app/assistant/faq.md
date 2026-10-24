@@ -176,7 +176,8 @@ Python 3.11 (version used everywhere, conda env `SEM7`); Pydantic v2 for typed d
 NumPy for the risk model; FastAPI and Uvicorn for the backend API; Streamlit for the dashboard;
 SQLAlchemy with PostgreSQL 16 (SQLite when run without Docker) as the database; git for sandbox repos
 and repair branches; Docker and Docker Compose for the three containers; GitHub Actions for CI; AWS EC2
-with Caddy for deployment; and optionally the Anthropic Claude API for this assistant.
+with Caddy for deployment; Google ADK and CrewAI on Gemini for the AI repair agents (separate
+`SEM7-agents` environment); and optionally the Anthropic Claude API for this assistant.
 
 ## How do I run the tests?
 Project tests: `conda activate SEM7` then `python -m pytest -q` (or
@@ -215,16 +216,42 @@ waits for you; no code changed), APPROVED, REJECTED, REPAIRING (fix being applie
 TESTING_REPAIR (re-testing), REFLECTING (fix incomplete, analysing why), PASSED (tests passed with no
 failure), PR_CREATED (fix verified and PR produced), ABORTED.
 
-## Is the investigation done by an AI agent or an LLM?
-Today investigation, root cause and planning use a rule-based `RepairStrategy` (deterministic and
-offline). It finds operators the commit changed and restores them, then escalates to restoring the
-whole function from the healthy baseline. The `RepairStrategy` interface has three slots
-(investigate, root_cause, plan), so LLM agents can replace the rules later while the approval gate,
-safety rules, real re-testing, reflection and PR steps stay unchanged.
+## Is the investigation done by an AI agent or an LLM? Rule-based or agents?
+Both are available, chosen per run on the Run Pipeline page (⚙️ Rule-based or 🤖 AI agents), or with
+`REPAIR_STRATEGY=rules|agents`. Rule-based (the default, used by CI) is deterministic and offline: it
+restores operators the commit changed, then escalates to restoring the whole function from the healthy
+baseline. AI agents run on Gemini: two Google ADK agents (Investigator, then Root-cause analyst, handing
+off through ADK session state) and a CrewAI crew (Repair Planner, then Code Reviewer). Both plug into the
+same `RepairStrategy` interface (investigate, root_cause, plan), so the safety checks, human approval,
+real re-testing, reflection and PR steps are identical. A workflow keeps the mode it started with.
+
+## How do I switch between rule-based and AI agents?
+On the Run Pipeline page, step 2 "Who analyses a failure and proposes the fix?" has two options:
+⚙️ Rule-based or 🤖 AI agents (Google ADK + CrewAI). Pick one before pressing Run; the workflow keeps that
+mode for later attempts. Over the API: `POST /workflows` with `"strategy": "rules"` or `"agents"`, and
+`GET /strategies` shows whether this backend can run agents. In the terminal:
+`python scripts/run_ci.py --scenario simple_bug --heal --approve --strategy agents`. The agent option needs
+the API running from the `SEM7-agents` environment (`requirements-agents.txt`) with `GOOGLE_API_KEY` and
+`GEMINI_API_KEY` in `.env`; otherwise the page shows why it is unavailable. The Docker images and CI use
+rules for now.
+
+## How do the AI agents work? (ADK and CrewAI)
+The agents only see an evidence package built from the real run: failing tests, error messages and
+tracebacks, the developer's diff, the current and baseline code, and earlier attempts. The ADK
+Investigator writes an `InvestigationReport`, the ADK Root-cause analyst reads it from shared session
+state and writes a `RootCauseReport`. The CrewAI Repair Planner then writes a `PlanDraft` (which function
+to replace and its complete new source); a guardrail rejects drafts that edit tests or config, are not
+valid Python or target a missing function, and the planner retries with that feedback. The Code Reviewer
+approves the draft or returns a corrected plan. The exact text being replaced is taken from the
+repository, not typed by the model. Every agent step (time, tokens, model, retries) is written to the
+workflow's event log; transient Gemini errors are retried, and if a step still fails the rule-based
+strategy does that step and the log says so. Model: `gemini-3.1-flash-lite` (setting `AGENT_MODEL`). In
+live tests the agents fixed scenario 1 and scenario 3 in one attempt each (rules need two for scenario 3).
 
 ## What is planned next?
-Agentic AI: RAG retrieval over code, tests, docs and history; LLM investigation and root-cause agents;
-an LLM solution planner for multi-file fixes; a vector database container; evaluation of the agents.
+Agentic AI: MCP tool servers for the agents (risk model, CI tools), A2A communication between the ADK
+and CrewAI agents, more agentic patterns (hierarchical, parallel), prompt-injection and toxicity guardrails,
+per-agent monitoring with a heat map and tracing, a 40-run evaluation with boxplots, and RAG retrieval.
 DevOps: automatic deployment from GitHub Actions, a container registry with versioned images and
 rollback, security scanning (pip-audit, Trivy, gitleaks), coverage and lint gates, monitoring with
 Prometheus and Grafana or CloudWatch, database backups, a real GitHub PR adapter, and optionally

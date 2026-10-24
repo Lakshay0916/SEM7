@@ -22,9 +22,10 @@ def render() -> None:
      "When a commit breaks the tests, this system scores how risky the change was, captures the real test "
         "evidence, investigates the root cause and proposes a fix. After your approval it repairs on a separate "
         "branch, proves the fix with real tests (reflecting and retrying if needed) and opens a pull request. "
-        "Analysis is rule-based today; LLM agents and RAG plug into the same loop next.",
+        "The analysis is done either by deterministic rules or by LLM agents (Google ADK + CrewAI on Gemini) - "
+        "you choose per run on the Run Pipeline page.",
         chips=["🔁 Self-healing loop with human approval", "🧪 Real tests, never faked", "🛡️ AI can't touch main",
-               "🚦 Risk-aware quality gate", "🐳 Docker + GitHub Actions"],
+               "🤖 ADK + CrewAI agents", "🚦 Risk-aware quality gate", "🐳 Docker + GitHub Actions"],
     )
 
     health = require_api()
@@ -86,7 +87,7 @@ def render() -> None:
         st.dataframe(
             pd.DataFrame([
                 {"Stage": label,
-                 "Status": {"built": "✅ Built", "rule": "✅ Rule-based (LLM agent next)",
+                 "Status": {"built": "✅ Built", "rule": "✅ Rule-based or AI agents",
                             "planned": "⏳ Planned"}[status]}
                 for _, label, status, _ in PROGRESS
             ]),

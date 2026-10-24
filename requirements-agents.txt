@@ -1,0 +1,7 @@
+# LLM multi-agent layer (REPAIR_STRATEGY=agents). Installed on top of requirements.txt in a separate
+# environment / container, so the base API and UI images (and CI) stay unchanged.
+#   conda create -n SEM7-agents python=3.11 && pip install -r requirements.txt -r requirements-agents.txt
+-r requirements.txt
+google-adk[a2a]>=2.12,<3     # Google Agent Development Kit: investigator + root-cause agents
+crewai[tools]>=1.15,<2       # CrewAI: planner + reviewer crew
+mcp>=1.28,<2                 # Model Context Protocol (tool servers)

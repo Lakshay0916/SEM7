@@ -71,6 +71,15 @@ def build_context(store: Store, wf_id: str) -> RepairContext:
     )
 
 
+def _log_agent_steps(store: Store, wf_id: str, strategy: RepairStrategy) -> None:
+    """Agent strategies report each LLM step (time, tokens, retries, fallbacks); record them as events."""
+    for rec in getattr(strategy, "pop_records", lambda: [])():
+        tokens = f" [{rec.prompt_tokens}+{rec.output_tokens} tokens]" if rec.prompt_tokens or rec.output_tokens else ""
+        store.log_event(wf_id, f"{rec.framework}:{rec.agent}", rec.status,
+                        f"{rec.message}{tokens}" + (f" model={rec.model}" if rec.model else ""),
+                        duration_ms=int(rec.seconds * 1000))
+
+
 def propose_fix(store: Store, wf_id: str, strategy: RepairStrategy) -> RepairPlan | None:
     """Investigate → root cause → plan, then wait for a human. Changes no code."""
     _require(store, wf_id, S.FAILED, S.REFLECTING, S.REJECTED)
@@ -80,6 +89,7 @@ def propose_fix(store: Store, wf_id: str, strategy: RepairStrategy) -> RepairPla
     store.transition(wf_id, S.INVESTIGATING, f"Investigating {len(ctx.failing_tests)} failing test(s) "
                      f"(attempt {ctx.attempt})", agent=agent)
     inv = strategy.investigate(ctx)
+    _log_agent_steps(store, wf_id, strategy)
     store.save_artifact(wf_id, "investigation", inv, attempt=ctx.attempt)
 
     rc = strategy.root_cause(ctx, inv)
@@ -88,6 +98,7 @@ def propose_fix(store: Store, wf_id: str, strategy: RepairStrategy) -> RepairPla
                      agent=agent)
 
     plan = strategy.plan(ctx, inv, rc)
+    _log_agent_steps(store, wf_id, strategy)
     if plan is None:
         store.transition(wf_id, S.ABORTED, "No applicable repair - handing over to a human", agent=agent)
         return None

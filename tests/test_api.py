@@ -79,3 +79,62 @@ def test_risk_endpoints(client):
     assert "variants" in client.get("/risk/model").json()
     ev = client.get("/risk/evaluation").json()
     assert ev["evaluation"]["dataset"]["rows"] > 0
+
+
+# --------------------------------------------------------------------------- rule-based vs agent switch
+
+
+def test_strategies_endpoint_reports_availability(client):
+    opts = {o["id"]: o for o in client.get("/strategies").json()}
+    assert opts["rules"]["available"] and opts["rules"]["default"]
+    assert set(opts) == {"rules", "agents"} and "model" in opts["agents"]
+
+
+def test_unavailable_agents_are_refused_not_faked(client, monkeypatch):
+    monkeypatch.setattr(api, "strategy_options", lambda: [
+        {"id": "rules", "label": "Rule-based", "available": True, "reason": "", "default": True},
+        {"id": "agents", "label": "AI agents", "available": False, "reason": "no Gemini key", "default": False}])
+    r = client.post("/workflows", json={"scenario": "simple_bug", "strategy": "agents"})
+    assert r.status_code == 409 and "no Gemini key" in r.json()["detail"]
+
+
+def test_workflow_keeps_the_strategy_it_started_with(client, monkeypatch):
+    from app.agents.models import FunctionEdit, PlanDraft
+    from app.agents.strategy import AgenticStrategy
+    from app.healing.rules import RuleBasedStrategy
+
+    def analysts(evidence, records):  # stand-in for the ADK agents: reuse the rules' analysis
+        ctx = analysts.ctx
+        inv = RuleBasedStrategy().investigate(ctx)
+        return inv, RuleBasedStrategy().root_cause(ctx, inv)
+
+    def planner(evidence, inv, rc, ctx, records):  # stand-in for the CrewAI crew
+        return PlanDraft(summary="restore +", root_cause="r", edits=[FunctionEdit(
+            file="src/calculator.py", function="add", description="d",
+            new_source='def add(a, b):\n    """Return the sum of a and b."""\n    return a + b\n')])
+
+    class FakeAgents(AgenticStrategy):
+        def investigate(self, ctx):
+            analysts.ctx = ctx
+            return super().investigate(ctx)
+
+    made = []
+    monkeypatch.setattr(api, "strategy_options", lambda: [
+        {"id": "rules", "label": "Rule-based", "available": True, "reason": "", "default": True},
+        {"id": "agents", "label": "AI agents", "available": True, "reason": "", "default": False}])
+    monkeypatch.setattr(api, "get_strategy", lambda name=None: made.append(name) or (
+        FakeAgents(analysts=analysts, planner=planner, fallback=False) if name == "agents" else RuleBasedStrategy()))
+
+    r = client.post("/workflows", json={"scenario": "simple_bug", "strategy": "agents"})
+    assert r.status_code == 201 and r.json()["strategy"] == "agents"
+    wf = r.json()["workflow_id"]
+    trace = client.get(f"/workflows/{wf}").json()
+    plan = next(a["payload"] for a in trace["artifacts"] if a["kind"] == "repair_plan")
+    assert plan["strategy"] == "adk+crewai"
+    assert client.post(f"/workflows/{wf}/approve", json={"reviewer": "alice"}).json()["state"] == "PR_CREATED"
+    assert made == ["agents", "agents"]  # the approve step re-used the workflow's own strategy
+
+    rules_run = client.post("/workflows", json={"scenario": "simple_bug", "strategy": "rules"}).json()
+    plan = next(a["payload"] for a in client.get(f"/workflows/{rules_run['workflow_id']}").json()["artifacts"]
+                if a["kind"] == "repair_plan")
+    assert plan["strategy"] == "rule-based"

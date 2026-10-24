@@ -20,8 +20,8 @@ BUILT = "digraph A {" + _STYLE + """
 
 AGENTS = "digraph B {" + _STYLE.replace("rankdir=LR", "rankdir=TB; newrank=true") + """
   fail [label="FailureEvent", fillcolor="#fdeaea", color="#ec9a9a"];
-  inv [label="Investigate\\n(rule-based → LLM)"]; rc [label="Root cause\\n(rule-based → LLM)"];
-  plan [label="Plan fix\\n(rule-based → LLM)"]; appr [label="Human\\napproval", shape=hexagon];
+  inv [label="Investigate\\n(rules | ADK agent)"]; rc [label="Root cause\\n(rules | ADK agent)"];
+  plan [label="Plan fix\\n(rules | CrewAI crew)"]; appr [label="Human\\napproval", shape=hexagon];
   rag [label="RAG\\nretrieval", style="rounded,dashed", fillcolor="#fafbfc", color="#b4bcc9", fontcolor="#5b6475"];
   rep [label="Repair on\\nai/repair/*"]; test [label="Re-test\\n(real pytest)"];
   pr [label="Pull request\\n(not merged)", fillcolor="#e6f5e6", color="#9fd59f"];
@@ -64,14 +64,14 @@ def render() -> None:
     st.title("How it works")
     hero(
         "One pipeline, clear responsibilities, a human in the loop",
-        "Solid boxes run today. Investigation, root cause and planning are rule-based for now and will be "
-        "replaced by LLM agents through the same interface; RAG (dashed) is planned. The hexagon is the human "
+        "Solid boxes run today. Investigation, root cause and planning are done either by rules or by LLM agents "
+        "(Google ADK + CrewAI) through the same interface - you pick per run; RAG (dashed) is planned. The hexagon is the human "
         "approval gate - no code is changed without it.",
         chips=["ML predicts", "RAG retrieves", "LLM reasons", "agents act", "tests verify"],
     )
     st.markdown("**Part 1 — built today:** commit → analysis → risk → real tests")
     st.graphviz_chart(_themed(BUILT), width="stretch")
-    st.markdown("**Part 2 — built (rule-based today):** the human-approved self-healing loop")
+    st.markdown("**Part 2 — built (rules or AI agents):** the human-approved self-healing loop")
     st.graphviz_chart(_themed(AGENTS), width="stretch")
     st.caption("Solid = built · dashed = planned · red = failure evidence · green = validated outcome · "
                "hexagon = human approval gate")
@@ -84,7 +84,7 @@ def render() -> None:
         "| CI / test runner | Runs the real tests and gives pass/fail evidence | Never guesses a result | ✅ Built |\n"
         "| Git layer | Branches, commits, diffs | Refuses AI writes to `main` | ✅ Built |\n"
         "| Repair strategy | Investigate → root cause → plan | Pluggable interface; proposes, never applies | "
-        "✅ Rule-based · LLM next |\n"
+        "✅ Rules or AI agents (ADK + CrewAI) |\n"
         "| Self-healing loop | Approval → repair branch → re-test → reflect → PR | Bounded retries; never merges | "
         "✅ Built |\n"
         "| Human | Approves or rejects every proposed fix | Final authority | ✅ Built |\n"

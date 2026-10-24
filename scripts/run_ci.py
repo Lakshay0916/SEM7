@@ -27,6 +27,8 @@ def main() -> int:
     parser.add_argument("--heal", action="store_true", help="on failure, investigate and propose a fix")
     parser.add_argument("--approve", action="store_true",
                         help="with --heal: you approve every proposed plan up front (recorded as 'cli --approve')")
+    parser.add_argument("--strategy", choices=["rules", "agents"], default=None,
+                        help="repair analysis: rule-based or ADK + CrewAI agents (default: REPAIR_STRATEGY or rules)")
     args = parser.parse_args()
 
     if args.list:
@@ -61,7 +63,7 @@ def main() -> int:
         print(f"  note: {n}")
 
     if args.heal and run.failure_event is not None:
-        _heal(repo_dir, run, args.approve)
+        _heal(repo_dir, run, args.approve, args.strategy)
 
     out = repo_dir.parent / "pipeline_run.json"
     out.write_text(run.model_dump_json(indent=2), encoding="utf-8")
@@ -69,13 +71,13 @@ def main() -> int:
     return 0
 
 
-def _heal(repo_dir, run, approve: bool) -> None:
+def _heal(repo_dir, run, approve: bool, strategy_name: str | None = None) -> None:
     from app.healing.loop import apply_and_verify, decide, propose_fix
-    from app.healing.rules import RuleBasedStrategy
+    from app.healing.factory import make_strategy
     from app.models.schemas import WorkflowState as S
     from app.orchestration.store import Store
 
-    store, strategy = Store(), RuleBasedStrategy()
+    store, strategy = Store(), make_strategy(strategy_name)
     wf = store.create_workflow(repo_dir, "cli", run.commit.sha, run.commit.branch)
     if run.risk:
         store.save_artifact(wf, "risk_assessment", run.risk)
@@ -100,6 +102,11 @@ def _heal(repo_dir, run, approve: bool) -> None:
         print(f"  Re-test after attempt {plan['attempt']}: {last['status']} "
               f"({last['tests_passed']} passed, {last['tests_failed']} failed)")
     print(f"  Final state: {store.state(wf).value}")
+    agent_steps = [e for e in store.events(wf) if ":" in (e["agent"] or "")]
+    if agent_steps:
+        print("  Agent steps:")
+        for e in agent_steps:
+            print(f"    {e['agent']:32} {e['status']:8} {(e['duration_ms'] or 0) / 1000:6.2f}s  {e['message'][:90]}")
     if pr := store.latest(wf, "pull_request"):
         print(f"  PR (local, not merged): {pr['url']}")
 

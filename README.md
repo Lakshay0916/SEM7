@@ -97,6 +97,7 @@ healthy `main` and a feature branch carrying the scenario's buggy commit.
 | IDT | Quality gate, 3-container Docker stack (ui + api + PostgreSQL), GitHub Actions (Linux + Windows + compose e2e), Markdown reports | done |
 | IDT | Deployment on AWS EC2 (AWS CLI + Docker Compose + Caddy HTTPS) | done — see `docs/DEPLOY.md` |
 | UI | Project assistant (chatbot): answers questions about the project and workflow runs | done — offline by default, Claude optional |
+| 5, 7 (LLM) | Multi-agent repair: Google ADK analysts + CrewAI planner/reviewer on Gemini | done (stage 1) — `REPAIR_STRATEGY=agents` |
 
 ## DevOps / IDT pipeline
 
@@ -112,6 +113,39 @@ healthy `main` and a feature branch carrying the scenario's buggy commit.
 **Gate policy** (`app/ci/quality_gate.py`) — tests always run; risk can only add scrutiny:
 FAIL / ERROR / TIMEOUT → **BLOCK** (red check) · tests pass + HIGH risk → **REVIEW** (warning) · otherwise **PASS**.
 Risk never skips tests: the diff-only model is a weak signal (test ROC-AUC 0.60).
+
+## LLM multi-agent repair (Google ADK + CrewAI)
+
+`REPAIR_STRATEGY=agents` replaces the rule-based analysis with LLM agents on Gemini. Everything around
+it - safety checks, human approval, repair branch, real tests, reflection, PR - is unchanged, and the
+default stays `rules` (CI, Docker and the EC2 stack need no API key).
+
+| Step | Framework | Agent | Output (Pydantic) |
+|---|---|---|---|
+| Investigate | Google ADK | Investigator | `InvestigationReport` |
+| Root cause | Google ADK | Root-cause analyst (reads the investigator's report from ADK session state) | `RootCauseReport` |
+| Plan | CrewAI | Repair Planner, guarded: no test/config edits, valid Python, function must exist | `PlanDraft` |
+| Review | CrewAI | Code Reviewer: approves or returns a corrected plan | `PlanReview` |
+
+- Agents work only from an evidence package built from the real run (`app/agents/evidence.py`): failing tests,
+  tracebacks, the diff, current and baseline code, earlier attempts.
+- Agents name a function and write its new source; the exact text replaced is taken from the repository, so
+  patches never fail on a miscopied character.
+- Each agent step (time, tokens, retries, guardrail blocks, fallbacks) is written to the workflow's event log.
+  Transient API errors are retried; if a step still fails, the rule-based strategy does that step and the
+  log says so (`AGENT_FALLBACK=0` to disable).
+
+**Switching:** on the **Run Pipeline** page choose ⚙️ *Rule-based* or 🤖 *AI agents* per run (or `POST /workflows`
+with `"strategy": "rules" | "agents"`; `GET /strategies` says whether this backend can run agents). A workflow keeps
+the strategy it started with for later attempts. The agent option is enabled when the API runs with the agent
+packages and a Gemini key - otherwise the page explains why it is unavailable.
+
+```bash
+conda create -n SEM7-agents python=3.11 && conda activate SEM7-agents
+pip install -r requirements-agents.txt          # separate env: base env and images stay unchanged
+# .env: GOOGLE_API_KEY=... and GEMINI_API_KEY=... (same Gemini key)
+python scripts/run_ci.py --scenario failed_first_repair --heal --approve --strategy agents
+```
 
 ## Project assistant (chatbot)
 

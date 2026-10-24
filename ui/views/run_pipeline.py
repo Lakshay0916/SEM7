@@ -7,9 +7,33 @@ from ui.workflow_view import render_workflow
 SCENARIO_HINT = {
     "simple_bug": "Expect: tests **fail** (2 of 9); one minimal fix (restore `+`) repairs it after your approval.",
     "high_risk_change": "Expect: tests **pass** but the change is broad - shows that risk ≠ bug.",
-    "failed_first_repair": "Expect: tests **fail** (3 of 9) from two defects. Fix 1 only partly works → "
-                           "reflection → fix 2 → tests pass → PR.",
+    "failed_first_repair": "Expect: tests **fail** (3 of 9) from two defects. Rule-based: fix 1 only partly works → "
+                           "reflection → fix 2 → tests pass → PR. AI agents usually fix both defects in one attempt.",
 }
+
+
+STRATEGY_HELP = {
+    "rules": "Deterministic Python rules investigate the failure and propose a fix. Instant, no API key, "
+             "same result every time - this is what CI uses.",
+    "agents": "Four LLM agents on Gemini: **Google ADK** Investigator → Root-cause analyst, then a **CrewAI** "
+              "Planner → Reviewer crew. They see only the real evidence; their plan still goes through the safety "
+              "checks, your approval and the real tests. Each agent step (time, tokens) appears in the timeline.",
+}
+
+
+def _strategy_picker(api) -> tuple[str, bool]:
+    """Rule-based vs AI-agent analysis. Returns (strategy id, can run)."""
+    options = {o["id"]: o for o in api.strategies()}
+    default = next((o["id"] for o in options.values() if o["default"]), "rules")
+    choice = st.segmented_control(
+        "2. Who analyses a failure and proposes the fix?", list(options), default=default, key="strategy", required=True,
+        format_func=lambda i: ("⚙️ " if i == "rules" else "🤖 ") + options[i]["label"], width="stretch",
+    )
+    opt = options[choice]
+    st.caption(STRATEGY_HELP[choice] + (f" Model: `{opt['model']}`." if opt.get("model") else ""))
+    if not opt["available"]:
+        st.warning(f"**{opt['label']} unavailable on this backend:** {opt['reason']}.")
+    return choice, opt["available"]
 
 
 def render() -> None:
@@ -19,7 +43,7 @@ def render() -> None:
         "Choose a scenario and press Run. The backend creates a fresh git repository from a small calculator "
         "project, commits the scenario's change on a feature branch, then analyses, risk-scores and really tests "
         "it. Each step below explains what it did and shows its actual output.",
-        chips=["1 · Pick a scenario", "2 · Run", "3 · Read the step-by-step report"],
+        chips=["1 · Pick a scenario", "2 · Rules or AI agents", "3 · Run", "4 · Read the step-by-step report"],
     )
     require_api()
     api = get_api()
@@ -44,10 +68,13 @@ def render() -> None:
                     else:
                         st.code(e["new"], language="python")
 
-    if st.button("2. ▶️ Run the pipeline", type="primary", width="stretch"):
-        with st.status("Backend is running the pipeline…", expanded=True) as status:
+    strategy, ready = _strategy_picker(api)
+    if st.button("3. ▶️ Run the pipeline", type="primary", width="stretch", disabled=not ready):
+        label = "AI agents are analysing the failure (about 20-40 s)…" if strategy == "agents" else \
+            "Backend is running the pipeline…"
+        with st.status(label, expanded=True) as status:
             try:
-                res = api.run(scenario_id)
+                res = api.run(scenario_id, strategy=strategy)
             except APIError as exc:
                 status.update(label=f"Failed: {exc.detail}", state="error")
                 st.stop()

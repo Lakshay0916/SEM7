@@ -19,10 +19,11 @@ from pydantic import BaseModel, Field
 from app.assistant.bot import Assistant
 from app.assistant.knowledge import KnowledgeBase
 from app.ci.scenarios import SCENARIOS
-from app.config import PROJECT_ROOT
+from app.config import PROJECT_ROOT, settings
 from app.git.safety import try_ai_commit_to_main
 from app.healing.loop import HealingError, abort, apply_and_verify, decide, propose_fix
-from app.healing.rules import RuleBasedStrategy
+from app.healing.factory import make_strategy, strategy_options
+from app.healing.strategy import RepairStrategy
 from app.orchestration.pipeline import run_ci_workflow
 from app.orchestration.state import InvalidTransition
 from app.orchestration.store import Store
@@ -50,8 +51,14 @@ def get_predictor() -> RiskPredictor | None:
     return RiskPredictor.load() if MODEL_PATH.exists() else None
 
 
-def get_strategy() -> RuleBasedStrategy:
-    return RuleBasedStrategy()
+def get_strategy(name: str | None = None) -> RepairStrategy:
+    return make_strategy(name)
+
+
+def strategy_for(store: Store, wf_id: str) -> RepairStrategy:
+    """The strategy a workflow was started with, so retries after reflection use the same one."""
+    choice = store.latest(wf_id, "strategy_choice")
+    return get_strategy(choice["strategy"] if choice else None)
 
 
 @lru_cache
@@ -80,6 +87,8 @@ def _conflict(_, exc: Exception):
 class RunRequest(BaseModel):
     scenario: str = Field(examples=["failed_first_repair"])
     heal: bool = Field(default=True, description="On failure, investigate and propose a fix (no code changes)")
+    strategy: Literal["rules", "agents"] | None = Field(
+        default=None, description="Who analyses failures: rule-based or ADK + CrewAI agents (default: server setting)")
 
 
 class Decision(BaseModel):
@@ -122,6 +131,12 @@ def health() -> dict:
             "risk_model": get_predictor().version if get_predictor() else None}
 
 
+@app.get("/strategies", tags=["meta"])
+def strategies() -> list[dict]:
+    """Repair strategies (rule-based / AI agents) and whether this backend can run them."""
+    return strategy_options()
+
+
 @app.get("/scenarios", tags=["meta"])
 def scenarios() -> list[dict]:
     return [
@@ -139,10 +154,15 @@ def scenarios() -> list[dict]:
 def run_workflow(req: RunRequest) -> dict:
     if req.scenario not in SCENARIOS:
         raise HTTPException(status_code=404, detail=f"unknown scenario {req.scenario!r}")
+    name = req.strategy or ("agents" if settings.repair_strategy.lower() == "agents" else "rules")
+    option = next(o for o in strategy_options() if o["id"] == name)
+    if not option["available"]:
+        raise HTTPException(status_code=409, detail=f"{option['label']} unavailable: {option['reason']}")
     store = get_store()
     result = run_ci_workflow(req.scenario, store, get_predictor(),
-                             strategy=get_strategy() if req.heal else None)
-    return _summary(store, result.workflow_id)
+                             strategy=get_strategy(name) if req.heal else None)
+    store.save_artifact(result.workflow_id, "strategy_choice", {"strategy": name})
+    return {**_summary(store, result.workflow_id), "strategy": name}
 
 
 @app.get("/workflows", tags=["workflows"])
@@ -159,7 +179,7 @@ def get_workflow(wf_id: str) -> dict:
 @app.post("/workflows/{wf_id}/propose", tags=["self-healing"])
 def propose(wf_id: str) -> dict:
     store = get_store()
-    propose_fix(store, wf_id, get_strategy())
+    propose_fix(store, wf_id, strategy_for(store, wf_id))
     return _summary(store, wf_id)
 
 
@@ -168,7 +188,7 @@ def approve(wf_id: str, d: Decision) -> dict:
     """Record the human approval, apply on the repair branch, re-test, then PR or reflect."""
     store = get_store()
     decide(store, wf_id, True, d.reviewer, d.comment)
-    apply_and_verify(store, wf_id, strategy=get_strategy())
+    apply_and_verify(store, wf_id, strategy=strategy_for(store, wf_id))
     return _summary(store, wf_id)
 
 

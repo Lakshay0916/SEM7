@@ -84,9 +84,10 @@ STEPS["heal"] = {
         "plan is proposed (max 3 attempts). A validated fix becomes a pull request that is never auto-merged."
     ),
     "why": (
-        "This closes the CI loop safely. Today the analysis is rule-based (no LLM): it restores the smallest "
-        "changed operator first, and escalates to restoring the whole function only if tests still fail. The "
-        "planned LLM agents plug into exactly the same interface, approval gate and test verification."
+        "This closes the CI loop safely. The analysis runs in one of two modes, chosen per run: rule-based (no LLM: "
+        "restore the smallest changed operator first, escalate to the whole function if tests still fail) or AI "
+        "agents (Google ADK investigator + root-cause agents, then a CrewAI planner + reviewer on Gemini). Both use "
+        "exactly the same interface, safety checks, approval gate and real test verification."
     ),
 }
 
@@ -94,16 +95,16 @@ STEPS["heal"] = {
 UPCOMING = [
     ("RAG knowledge retrieval", "Agentic AI",
      "Search the project's code, tests, docs and history for context relevant to the failure."),
-    ("LLM investigation & root-cause agents", "Agentic AI",
-     "Replace the rule-based analysis via the same RepairStrategy interface - same approval gate, same real tests."),
-    ("LLM solution planner", "Agentic AI",
-     "Propose fixes beyond reverting the commit (new logic, multi-file changes), still validated by tests."),
+    ("MCP tools & A2A between agents", "Agentic AI",
+     "Expose the risk model and CI tools to the agents via MCP; ADK and CrewAI agents talk over the A2A protocol."),
+    ("Agent guardrails, tracing & evaluation", "Agentic AI",
+     "Prompt-injection/toxicity checks, per-agent heat map and tracing, and a 40-run benchmark with boxplots."),
     ("GitHub PR adapter", "DevOps",
      "Open real pull requests on GitHub; sandboxes use the local adapter today."),
 ]
 
 # Progress strip: (key, label, status, workflow state that marks it reached)
-# status: built | rule (built, rule-based now, LLM agent later) | planned
+# status: built | rule (built: rules or AI agents, chosen per run) | planned
 PROGRESS = [
     ("sandbox", "Commit", "built", "RECEIVED"),
     ("diff", "Diff", "built", "RECEIVED"),

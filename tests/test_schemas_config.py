@@ -18,7 +18,9 @@ def test_risk_score_bounds():
 def test_secrets_not_in_repr(monkeypatch):
     monkeypatch.setenv("LLM_API_KEY", "sk-super-secret")
     monkeypatch.setenv("GITHUB_TOKEN", "ghp_super_secret")
+    monkeypatch.setenv("GOOGLE_API_KEY", "AIza-fake-google")  # never the real key from .env
+    monkeypatch.setenv("GEMINI_API_KEY", "AIza-fake-google")
     s = Settings()
-    assert "sk-super-secret" not in repr(s)
-    assert "ghp_super_secret" not in repr(s)
-    assert set(s.secret_values()) == {"sk-super-secret", "ghp_super_secret"}
+    for secret in ("sk-super-secret", "ghp_super_secret", "AIza-fake-google"):
+        assert secret not in repr(s)
+    assert s.secret_values() == ["sk-super-secret", "ghp_super_secret", "AIza-fake-google"]
