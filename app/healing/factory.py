@@ -35,16 +35,24 @@ def strategy_options() -> list[dict]:
         except ModuleNotFoundError:  # parent package (e.g. `google`) missing
             return False
 
-    missing = [m for m in ("google.adk", "crewai") if not installed(m)]
-    has_key = bool(settings.google_api_key or settings.gemini_api_key)
-    reason = (f"agent packages not installed in this backend ({', '.join(missing)}) - "
-              "run the API from the SEM7-agents environment (requirements-agents.txt)" if missing
-              else "no Gemini key - set GOOGLE_API_KEY and GEMINI_API_KEY in .env" if not has_key else "")
+    if settings.agent_transport == "a2a":  # agents run in their own services; ask them, over A2A
+        from app.a2a_agents.protocol import fetch_card
+
+        down = [u for u in (settings.adk_agent_url, settings.crew_agent_url) if fetch_card(u) is None]
+        reason = (f"agent services not reachable over A2A ({', '.join(down)}) - start them with "
+                  "`docker compose --profile agents up -d`" if down else "")
+    else:
+        missing = [m for m in ("google.adk", "crewai") if not installed(m)]
+        has_key = bool(settings.google_api_key or settings.gemini_api_key)
+        reason = (f"agent packages not installed in this backend ({', '.join(missing)}) - "
+                  "run the API from the SEM7-agents environment (requirements-agents.txt)" if missing
+                  else "no Gemini key - set GOOGLE_API_KEY and GEMINI_API_KEY in .env" if not has_key else "")
     return [
         {"id": "rules", "label": STRATEGY_LABELS["rules"], "available": True, "reason": "",
          "default": settings.repair_strategy.lower() in ("rules", "rule-based")},
         {"id": "agents", "label": STRATEGY_LABELS["agents"], "available": not reason, "reason": reason,
          "model": settings.agent_model, "default": settings.repair_strategy.lower() == "agents",
+         "transport": settings.agent_transport,
          "messaging": [{"id": "blackboard", "label": "Blackboard (shared state)",
                         "default": settings.agent_messaging == "blackboard"},
                        {"id": "direct", "label": "Direct hand-off (point-to-point)",

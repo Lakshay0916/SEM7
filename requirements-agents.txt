@@ -3,5 +3,5 @@
 #   conda create -n SEM7-agents python=3.11 && pip install -r requirements.txt -r requirements-agents.txt
 -r requirements.txt
 google-adk[a2a]>=2.12,<3     # Google Agent Development Kit: investigator + root-cause agents
-crewai[tools]>=1.15,<2       # CrewAI: planner + reviewer crew
+crewai>=1.15,<2              # CrewAI: planner + reviewer crew (MCP support is in core)
 mcp>=1.28,<2                 # Model Context Protocol (tool servers)

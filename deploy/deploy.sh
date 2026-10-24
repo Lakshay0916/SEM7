@@ -7,6 +7,10 @@
 # 2. first run only: generate .env (random Postgres password, SITE_HOST) and the web login
 # 3. docker compose (base + prod overlay) up --build --wait
 # 4. smoke test: /health through Caddy over HTTPS
+#
+# AI agents: if the local .env has a Gemini key (GOOGLE_API_KEY), it is written to the server's .env over SSH
+# (never committed, never printed) and the A2A agent services (compose profile "agents") are started too.
+# DEPLOY_AGENTS=0 deploys without them.
 set -euo pipefail
 
 IP="${1:?usage: deploy/deploy.sh <public-ip> [ssh-key]}"
@@ -28,11 +32,19 @@ git -C "$ROOT" archive --format=tar.gz -o "$TARBALL" HEAD
 scp -i "$KEY" -q "$TARBALL" "ubuntu@$IP:/tmp/sem7.tar.gz"
 rm -f "$TARBALL"
 
-"${SSH[@]}" SITE_HOST="$SITE_HOST" bash -s <<'REMOTE'
+# Gemini key for the agent services: read from the local .env, piped over SSH stdin (not on the command line).
+GEMINI_KEY="$(grep -E '^GOOGLE_API_KEY=' "$ROOT/.env" 2>/dev/null | cut -d= -f2- || true)"
+AGENTS=0
+if [[ "${DEPLOY_AGENTS:-1}" == "1" && -n "$GEMINI_KEY" ]]; then
+  AGENTS=1
+  printf '%s' "$GEMINI_KEY" | "${SSH[@]}" 'umask 077; mkdir -p ~/sem7; cat > ~/sem7/.gemini-key'
+fi
+
+"${SSH[@]}" SITE_HOST="$SITE_HOST" AGENTS="$AGENTS" bash -s <<'REMOTE'
 set -euo pipefail
 mkdir -p ~/sem7 && cd ~/sem7
 # Replace code, keep server-only secrets.
-find . -mindepth 1 -maxdepth 1 ! -name .env ! -name deploy -exec rm -rf {} +
+find . -mindepth 1 -maxdepth 1 ! -name .env ! -name .gemini-key ! -name deploy -exec rm -rf {} +
 find deploy -mindepth 1 ! -name auth.caddy -delete 2>/dev/null || true
 tar -xzf /tmp/sem7.tar.gz && rm /tmp/sem7.tar.gz
 
@@ -52,6 +64,17 @@ if [[ ! -f deploy/auth.caddy ]]; then
   HASH="$(docker run --rm caddy:2-alpine caddy hash-password --plaintext "$PASS")"
   printf 'basic_auth {\n\tadmin %s\n}\n' "$HASH" > deploy/auth.caddy
   echo "WEB LOGIN (shown once): user=admin password=$PASS"
+fi
+
+# Agent services: put the key into .env (replacing any old value) and enable the "agents" compose profile.
+if [[ "$AGENTS" == "1" && -f .gemini-key ]]; then
+  KEY="$(cat .gemini-key)"; rm -f .gemini-key
+  sed -i '/^GOOGLE_API_KEY=/d; /^GEMINI_API_KEY=/d; /^COMPOSE_PROFILES=/d' .env
+  printf 'GOOGLE_API_KEY=%s\nGEMINI_API_KEY=%s\nCOMPOSE_PROFILES=agents\n' "$KEY" "$KEY" >> .env
+  chmod 600 .env
+  echo "agent services enabled (Gemini key set in server .env)"
+elif [[ "$AGENTS" == "0" ]]; then
+  sed -i '/^COMPOSE_PROFILES=/d' .env
 fi
 
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build --wait --remove-orphans

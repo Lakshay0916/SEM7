@@ -124,12 +124,20 @@ class AgenticStrategy:
 
     def __init__(self, analysts: Analysts | None = None, planner: Planner | None = None,
                  fallback: bool | None = None, messaging: str | None = None,
-                 sources: list[KnowledgeSource] | None = None) -> None:
+                 sources: list[KnowledgeSource] | None = None, transport: str | None = None) -> None:
         self.messaging = (messaging or settings.agent_messaging).lower()
+        self.transport = (transport or settings.agent_transport).lower()
+        if self.transport not in ("local", "a2a"):
+            raise ValueError(f"unknown AGENT_TRANSPORT {self.transport!r} (use local or a2a)")
         if self.messaging not in MESSAGING:
             raise ValueError(f"unknown AGENT_MESSAGING {self.messaging!r} (use {' or '.join(MESSAGING)})")
         self.analysts = analysts or _default_analysts
         self.planner = planner or _default_planner
+        self.remote = None
+        if self.transport == "a2a" and analysts is None and planner is None:
+            from app.a2a_agents.remote import RemoteDirect
+
+            self.remote = RemoteDirect()
         self.sources = sources
         self.fallback = RuleBasedStrategy() if (settings.agent_fallback if fallback is None else fallback) else None
         self.records: list[AgentRecord] = []
@@ -152,7 +160,15 @@ class AgenticStrategy:
                                         message=f"{type(exc).__name__}: {str(exc)[:200]} - using rule-based {step}"))
 
     def _controller(self, ctx: RepairContext) -> BlackboardController:
-        return BlackboardController(self.sources or default_sources(scope=scope_of(ctx)), plan_guards(ctx.repo_dir))
+        if self.sources:
+            sources = self.sources
+        elif self.transport == "a2a":
+            from app.a2a_agents.remote import remote_sources
+
+            sources = remote_sources(scope_of(ctx))
+        else:
+            sources = default_sources(scope=scope_of(ctx))
+        return BlackboardController(sources, plan_guards(ctx.repo_dir))
 
     # ------------------------------------------------------------------ interface
 
@@ -168,8 +184,12 @@ class AgenticStrategy:
                 inv = InvestigationReport.model_validate(bb.get("investigation"))
                 rc = RootCauseReport.model_validate(bb.get("root_cause"))
             else:
-                inv, rc = (self.analysts(evidence, self.records, scope_of(ctx)) if self.analysts is _default_analysts
-                           else self.analysts(evidence, self.records))
+                if self.remote is not None:
+                    inv, rc = self.remote.analyse(evidence, self.records, scope_of(ctx), ctx.repo_dir)
+                elif self.analysts is _default_analysts:
+                    inv, rc = self.analysts(evidence, self.records, scope_of(ctx))
+                else:
+                    inv, rc = self.analysts(evidence, self.records)
         except Exception as exc:
             self._fail("analysis", exc)
             self._cache[ctx.attempt] = (evidence, None)
@@ -198,6 +218,8 @@ class AgenticStrategy:
                 review = PlanReview.model_validate(self._controller(ctx).run_until(self.boards[ctx.attempt],
                                                                                    "review", self.records))
                 draft = review.final_plan
+            elif self.remote is not None:
+                draft = self.remote.plan(ctx.repo_dir)  # the CrewAI service already planned during the hand-off
             else:
                 draft = self.planner(evidence, investigation, root_cause, ctx, self.records)
             problems = check_draft(draft, ctx.repo_dir)

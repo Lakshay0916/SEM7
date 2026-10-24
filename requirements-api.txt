@@ -11,5 +11,6 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 sqlalchemy>=2.0
 psycopg[binary]>=3.2
+a2a-sdk[http-server]>=1.2,<2   # A2A client: talks to the agent services (AGENT_TRANSPORT=a2a)
 anthropic>=2.1,<3    # project assistant (only used when LLM_PROVIDER=anthropic)
 httpx>=0.27          # FastAPI TestClient in tests

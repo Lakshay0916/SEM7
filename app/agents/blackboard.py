@@ -118,9 +118,10 @@ class BlackboardController:
             ks = ready[0]
             start, seen = time.monotonic(), len(records)
             content, summary = ks.run(bb, records)
-            for r in records[seen:]:  # tool calls the agent made while working, in order
-                if r.framework == "mcp":
-                    bb.post(f"tool:{r.agent.split(' → ')[-1]}", r.message, author=ks.name, framework="mcp",
+            for r in records[seen:]:  # A2A messages and MCP tool calls made while the agent worked, in order
+                if r.framework in ("mcp", "a2a"):
+                    prefix = "tool" if r.framework == "mcp" else "a2a"
+                    bb.post(f"{prefix}:{r.agent.split(' → ')[-1]}", r.message, author=ks.name, framework=r.framework,
                             summary=f"{r.status} in {r.seconds:.2f}s - {r.message}")
             bb.post(ks.produces, content, author=ks.name, framework=ks.framework, summary=summary)
             for guard in (g for g in self.guards if g.key == ks.produces):

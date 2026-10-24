@@ -146,6 +146,13 @@ default stays `rules` (CI, Docker and the EC2 stack need no API key).
 
   ADK connects with `McpToolset`, CrewAI with `Agent(mcps=[MCPServerStdio(...)])`; each call (agent, tool, time,
   result) is recorded via ADK tool callbacks / CrewAI's event bus and posted to the blackboard.
+- **A2A agent services (`AGENT_TRANSPORT=a2a`):** the ADK agents and the CrewAI agents each run in their own
+  service (`app/a2a_agents/`, containers `agent-adk` :8101 and `agent-crew` :8102) and publish an A2A Agent Card
+  (`/.well-known/agent-card.json`) listing their skills. The orchestrator calls them with the official a2a-sdk
+  (JSON-RPC `message/send`, typed data parts). In blackboard mode each knowledge source is an A2A call; in direct
+  mode the ADK service hands its root cause to the CrewAI service itself over A2A (ADK agent -> CrewAI agent).
+  `docker compose --profile agents up -d` starts them; without them the UI says agents are unavailable and the
+  rule-based mode keeps working.
 - Agents work only from an evidence package built from the real run (`app/agents/evidence.py`): failing tests,
   tracebacks, the diff, current and baseline code, earlier attempts.
 - Agents name a function and write its new source; the exact text replaced is taken from the repository, so

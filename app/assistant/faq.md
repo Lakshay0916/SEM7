@@ -263,6 +263,19 @@ path and commit IDs, never API keys), paths outside the repository and edits to 
 every tool call (agent, tool, time, result) is recorded and shown as a 🔧 post on the blackboard.
 `AGENT_TOOLS=0` switches the tools off.
 
+## How do the agents communicate with A2A? Where do the agents run?
+The ADK agents and the CrewAI agents run as two separate A2A (Agent-to-Agent protocol) services: `agent-adk`
+(port 8101; skills investigator, root_cause_analyst, analyse_and_plan) and `agent-crew` (port 8102; skills
+plan, review, plan_and_review). Each publishes an Agent Card at `/.well-known/agent-card.json` describing its
+skills, and receives work as JSON-RPC `message/send` requests with typed data parts (official a2a-sdk). In
+blackboard mode the orchestrator's blackboard controller sends each agent its inputs over A2A and posts the
+reply to the board. In direct mode the orchestrator calls the ADK service once, and the ADK root-cause agent
+hands its result to the CrewAI crew over A2A - an ADK agent talking to a CrewAI agent, which shows
+interoperability between the two frameworks. Every A2A message is recorded (caller, service, skill, time) and
+shown as a 📡 post on the blackboard. In Docker they start with `docker compose --profile agents up -d`
+(they share the workspace volume with the API so their MCP tools can read and dry-run the sandbox). If the
+services are not running, the AI agents option says why it is unavailable and rule-based still works.
+
 ## How do the AI agents work? (ADK and CrewAI)
 The agents only see an evidence package built from the real run: failing tests, error messages and
 tracebacks, the developer's diff, the current and baseline code, and earlier attempts. The ADK

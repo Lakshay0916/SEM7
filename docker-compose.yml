@@ -4,6 +4,7 @@
 #   (ports busy? API_PORT=8010 UI_PORT=8512 docker compose up)
 #   docker compose --profile tools run --rm tests     test suite in the API image (store tests also on Postgres)
 #   docker compose --profile tools run --rm cli python scripts/run_ci.py --scenario failed_first_repair --heal --approve
+#   docker compose --profile agents up -d --build     + the A2A agent services (ADK + CrewAI; needs a Gemini key in .env)
 #   docker compose down            (add -v to also delete the database and workspaces)
 
 x-db-env: &db-url
@@ -35,6 +36,9 @@ services:
         required: false
     environment:
       <<: *db-url
+      AGENT_TRANSPORT: a2a                      # agents live in their own services (profile "agents")
+      ADK_AGENT_URL: http://agent-adk:8101/
+      CREW_AGENT_URL: http://agent-crew:8102/
     volumes:
       - workspace:/app/workspace   # sandbox repos and repair branches
     ports:
@@ -55,6 +59,47 @@ services:
       - "${UI_PORT:-8502}:8502"
     depends_on:
       api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---- A2A agent services (optional): docker compose --profile agents up -d
+  agent-crew:
+    build:
+      context: .
+      dockerfile: docker/agents.Dockerfile
+    image: sem7-agents:latest
+    profiles: ["agents"]
+    command: ["python", "-m", "app.a2a_agents.crew_service"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *db-url
+      A2A_PORT: "8102"
+      A2A_PUBLIC_URL: http://agent-crew:8102/
+    volumes:
+      - workspace:/app/workspace   # same sandboxes as the api: MCP tools read and dry-run them
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  agent-adk:
+    image: sem7-agents:latest
+    profiles: ["agents"]
+    command: ["python", "-m", "app.a2a_agents.adk_service"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *db-url
+      A2A_PORT: "8101"
+      A2A_PUBLIC_URL: http://agent-adk:8101/
+      CREW_AGENT_URL: http://agent-crew:8102/   # direct hand-off: ADK agent -> CrewAI agent over A2A
+    volumes:
+      - workspace:/app/workspace
+    depends_on:
+      agent-crew:
         condition: service_healthy
     restart: unless-stopped
 
