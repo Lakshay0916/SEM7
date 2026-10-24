@@ -6,7 +6,7 @@ from app.config import settings
 from app.healing.strategy import RepairStrategy
 
 
-def make_strategy(name: str | None = None) -> RepairStrategy:
+def make_strategy(name: str | None = None, messaging: str | None = None) -> RepairStrategy:
     name = (name or settings.repair_strategy).lower()
     if name in ("rules", "rule-based"):
         from app.healing.rules import RuleBasedStrategy
@@ -18,7 +18,7 @@ def make_strategy(name: str | None = None) -> RepairStrategy:
         except ImportError as exc:  # frameworks live in requirements-agents.txt, not the base image
             raise RuntimeError(f"REPAIR_STRATEGY=agents needs the agent packages "
                                f"(pip install -r requirements-agents.txt): {exc}") from exc
-        return AgenticStrategy()
+        return AgenticStrategy(messaging=messaging)
     raise ValueError(f"unknown REPAIR_STRATEGY {name!r} (use 'rules' or 'agents')")
 
 
@@ -44,5 +44,9 @@ def strategy_options() -> list[dict]:
         {"id": "rules", "label": STRATEGY_LABELS["rules"], "available": True, "reason": "",
          "default": settings.repair_strategy.lower() in ("rules", "rule-based")},
         {"id": "agents", "label": STRATEGY_LABELS["agents"], "available": not reason, "reason": reason,
-         "model": settings.agent_model, "default": settings.repair_strategy.lower() == "agents"},
+         "model": settings.agent_model, "default": settings.repair_strategy.lower() == "agents",
+         "messaging": [{"id": "blackboard", "label": "Blackboard (shared state)",
+                        "default": settings.agent_messaging == "blackboard"},
+                       {"id": "direct", "label": "Direct hand-off (point-to-point)",
+                        "default": settings.agent_messaging == "direct"}]},
     ]

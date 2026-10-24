@@ -107,6 +107,10 @@ def _attempt_block(tv: TraceView, n: int) -> None:
             c2.markdown(f"**Tests to run**\n" + "\n".join(f"- `{t}`" for t in plan["tests"])
                         + f"\n\n**Rollback:** {plan['rollback_plan']}")
 
+        board = [a["payload"] for a in tv.artifacts("blackboard") if a["attempt"] == n]
+        if board:
+            _blackboard(board)
+
         if approval:
             verdict = "✅ Approved" if approval["approved"] else "🚫 Rejected"
             st.markdown(f"**👤 Human decision:** {verdict} by **{approval['reviewer']}**"
@@ -124,6 +128,25 @@ def _attempt_block(tv: TraceView, n: int) -> None:
                        if refl["still_failing"] else "")
                     + (f"  \n⚠️ Regressions: {', '.join(f'`{t}`' for t in refl['regressions'])}"
                        if refl["regressions"] else ""))
+
+
+FRAMEWORK_ICON = {"system": "⚙️", "adk": "🔷", "crewai": "🟧", "guardrail": "🛡️", "rule-based": "📏"}
+
+
+def _blackboard(board: list[dict]) -> None:
+    """The shared blackboard the agents collaborated through, in posting order."""
+    agents = sorted({e["author"] for e in board if e["framework"] in ("adk", "crewai")})
+    with st.expander(f"🧩 Blackboard — {len(board)} posts by {len(agents)} agents (shared state)", expanded=False):
+        st.caption("Agents never call each other: each read its inputs from this board and posted its result here; "
+                   "the controller picked who ran next. Struck-through posts were rejected by a guardrail and "
+                   "retracted - the agent then retried with the feedback posted after it.")
+        for e in board:
+            icon = FRAMEWORK_ICON.get(e["framework"], "•")
+            text = f"**#{e['seq']} `{e['key']}`** — {icon} {e['author']} · _{e['framework']}_ — {e['summary']}"
+            st.markdown(f"~~{text}~~ _(retracted)_" if e["retracted"] else text)
+        with st.popover("Show raw posts (JSON)"):
+            st.json([{k: e[k] for k in ("seq", "key", "author", "framework", "ts", "retracted", "content")}
+                     for e in board], expanded=False)
 
 
 def _healing(api: ApiClient, tv: TraceView, wf_id: str) -> None:

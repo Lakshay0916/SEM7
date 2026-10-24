@@ -122,17 +122,18 @@ def test_workflow_keeps_the_strategy_it_started_with(client, monkeypatch):
     monkeypatch.setattr(api, "strategy_options", lambda: [
         {"id": "rules", "label": "Rule-based", "available": True, "reason": "", "default": True},
         {"id": "agents", "label": "AI agents", "available": True, "reason": "", "default": False}])
-    monkeypatch.setattr(api, "get_strategy", lambda name=None: made.append(name) or (
-        FakeAgents(analysts=analysts, planner=planner, fallback=False) if name == "agents" else RuleBasedStrategy()))
+    monkeypatch.setattr(api, "get_strategy", lambda name=None, messaging=None: made.append((name, messaging)) or (
+        FakeAgents(analysts=analysts, planner=planner, fallback=False, messaging="direct") if name == "agents"
+        else RuleBasedStrategy()))
 
-    r = client.post("/workflows", json={"scenario": "simple_bug", "strategy": "agents"})
-    assert r.status_code == 201 and r.json()["strategy"] == "agents"
+    r = client.post("/workflows", json={"scenario": "simple_bug", "strategy": "agents", "messaging": "direct"})
+    assert r.status_code == 201 and r.json()["strategy"] == "agents" and r.json()["messaging"] == "direct"
     wf = r.json()["workflow_id"]
     trace = client.get(f"/workflows/{wf}").json()
     plan = next(a["payload"] for a in trace["artifacts"] if a["kind"] == "repair_plan")
     assert plan["strategy"] == "adk+crewai"
     assert client.post(f"/workflows/{wf}/approve", json={"reviewer": "alice"}).json()["state"] == "PR_CREATED"
-    assert made == ["agents", "agents"]  # the approve step re-used the workflow's own strategy
+    assert made == [("agents", "direct"), ("agents", "direct")]  # approve re-used the workflow's own strategy
 
     rules_run = client.post("/workflows", json={"scenario": "simple_bug", "strategy": "rules"}).json()
     plan = next(a["payload"] for a in client.get(f"/workflows/{rules_run['workflow_id']}").json()["artifacts"]

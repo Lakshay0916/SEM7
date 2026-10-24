@@ -108,7 +108,7 @@ def test_plan_original_text_comes_from_the_repo_not_the_model(failed_ctx):
 def test_agentic_strategy_heals_through_the_unchanged_loop(store, failed_ctx):
     wf, ctx = failed_ctx
     fake_analysts.ctx = ctx
-    strategy = AgenticStrategy(analysts=fake_analysts, planner=fake_planner, fallback=False)
+    strategy = AgenticStrategy(analysts=fake_analysts, planner=fake_planner, fallback=False, messaging="direct")
     from app.healing.loop import propose_fix
 
     plan = propose_fix(store, wf, strategy)
@@ -128,7 +128,7 @@ def test_analysis_failure_falls_back_to_rules_and_is_logged(store, failed_ctx):
 
     from app.healing.loop import propose_fix
 
-    plan = propose_fix(store, wf, AgenticStrategy(analysts=broken, planner=fake_planner, fallback=True))
+    plan = propose_fix(store, wf, AgenticStrategy(analysts=broken, planner=fake_planner, fallback=True, messaging="direct"))
     assert plan is not None and plan.strategy == "adk+crewai"  # planning still by the crew
     fallback = [e for e in store.events(wf) if e["status"] == "fallback"]
     assert fallback and "model unavailable" in fallback[0]["message"]
@@ -145,7 +145,7 @@ def test_invalid_agent_plan_is_blocked_then_rules_take_over(store, failed_ctx):
 
     from app.healing.loop import propose_fix
 
-    plan = propose_fix(store, wf, AgenticStrategy(analysts=fake_analysts, planner=cheating, fallback=True))
+    plan = propose_fix(store, wf, AgenticStrategy(analysts=fake_analysts, planner=cheating, fallback=True, messaging="direct"))
     assert plan.strategy == "rule-based"
     statuses = [e["status"] for e in store.events(wf)]
     assert "blocked" in statuses and "fallback" in statuses
@@ -158,7 +158,7 @@ def test_without_fallback_agent_errors_surface(failed_ctx):
         raise RuntimeError("boom")
 
     with pytest.raises(RuntimeError, match="boom"):
-        AgenticStrategy(analysts=broken, planner=fake_planner, fallback=False).investigate(ctx)
+        AgenticStrategy(analysts=broken, planner=fake_planner, fallback=False, messaging="direct").investigate(ctx)
 
 
 # --------------------------------------------------------------------------- factory & retries

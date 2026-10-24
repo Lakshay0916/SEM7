@@ -235,6 +235,20 @@ the API running from the `SEM7-agents` environment (`requirements-agents.txt`) w
 `GEMINI_API_KEY` in `.env`; otherwise the page shows why it is unavailable. The Docker images and CI use
 rules for now.
 
+## What is the blackboard architecture? How do the agents share context?
+The agents share context through a blackboard (shared state), the default (`AGENT_MESSAGING=blackboard`).
+Agents never call each other. The orchestrator posts the evidence package; then a controller repeatedly picks
+an agent whose inputs are on the board and whose output is not: the ADK Investigator reads `evidence` and posts
+`investigation`, the ADK Root-cause analyst reads both and posts `root_cause`, the CrewAI Repair Planner posts
+`plan_draft`, and the CrewAI Code Reviewer posts `review`. A guardrail checks the plan; if it is rejected
+(for example it edits a test) the post is retracted and the guardrail's feedback is posted, so the planner
+runs again with it. Every post keeps its author, framework, time and content and is saved with the workflow:
+see the Blackboard panel in each attempt. The alternative messaging architecture is direct hand-off
+(`AGENT_MESSAGING=direct`): each agent passes its output straight to the next (ADK session state, then CrewAI
+task context), with no shared board. You choose between them on the Run Pipeline page when AI agents are
+selected. In one live comparison the blackboard used about 2.6 times fewer CrewAI prompt tokens, because each
+agent receives only what it needs from the board.
+
 ## How do the AI agents work? (ADK and CrewAI)
 The agents only see an evidence package built from the real run: failing tests, error messages and
 tracebacks, the developer's diff, the current and baseline code, and earlier attempts. The ADK

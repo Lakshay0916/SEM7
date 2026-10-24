@@ -29,6 +29,8 @@ def main() -> int:
                         help="with --heal: you approve every proposed plan up front (recorded as 'cli --approve')")
     parser.add_argument("--strategy", choices=["rules", "agents"], default=None,
                         help="repair analysis: rule-based or ADK + CrewAI agents (default: REPAIR_STRATEGY or rules)")
+    parser.add_argument("--messaging", choices=["blackboard", "direct"], default=None,
+                        help="with --strategy agents: blackboard (shared state) or direct hand-off")
     args = parser.parse_args()
 
     if args.list:
@@ -63,7 +65,7 @@ def main() -> int:
         print(f"  note: {n}")
 
     if args.heal and run.failure_event is not None:
-        _heal(repo_dir, run, args.approve, args.strategy)
+        _heal(repo_dir, run, args.approve, args.strategy, args.messaging)
 
     out = repo_dir.parent / "pipeline_run.json"
     out.write_text(run.model_dump_json(indent=2), encoding="utf-8")
@@ -71,13 +73,13 @@ def main() -> int:
     return 0
 
 
-def _heal(repo_dir, run, approve: bool, strategy_name: str | None = None) -> None:
+def _heal(repo_dir, run, approve: bool, strategy_name: str | None = None, messaging: str | None = None) -> None:
     from app.healing.loop import apply_and_verify, decide, propose_fix
     from app.healing.factory import make_strategy
     from app.models.schemas import WorkflowState as S
     from app.orchestration.store import Store
 
-    store, strategy = Store(), make_strategy(strategy_name)
+    store, strategy = Store(), make_strategy(strategy_name, messaging)
     wf = store.create_workflow(repo_dir, "cli", run.commit.sha, run.commit.branch)
     if run.risk:
         store.save_artifact(wf, "risk_assessment", run.risk)
@@ -107,6 +109,14 @@ def _heal(repo_dir, run, approve: bool, strategy_name: str | None = None) -> Non
         print("  Agent steps:")
         for e in agent_steps:
             print(f"    {e['agent']:32} {e['status']:8} {(e['duration_ms'] or 0) / 1000:6.2f}s  {e['message'][:90]}")
+    board = store.artifacts(wf, "blackboard")
+    if board:
+        print("  Blackboard (shared state):")
+        for a in board:
+            e = a["payload"]
+            mark = " [retracted]" if e["retracted"] else ""
+            print(f"    #{e['seq']:<2} att{e['attempt']} {e['key']:20} by {e['author']} ({e['framework']}){mark}: "
+                  f"{e['summary'][:70]}")
     if pr := store.latest(wf, "pull_request"):
         print(f"  PR (local, not merged): {pr['url']}")
 

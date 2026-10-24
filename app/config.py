@@ -47,6 +47,8 @@ class Settings:
     # Self-healing analysis: "rules" (deterministic, default - CI uses this) or "agents" (ADK + CrewAI on Gemini)
     repair_strategy: str = field(default_factory=lambda: os.getenv("REPAIR_STRATEGY") or "rules")
     agent_model: str = field(default_factory=lambda: os.getenv("AGENT_MODEL") or "gemini-3.1-flash-lite")
+    # How the agents share context: "blackboard" (shared state, default) or "direct" (point-to-point hand-off)
+    agent_messaging: str = field(default_factory=lambda: os.getenv("AGENT_MESSAGING") or "blackboard")
     agent_fallback: bool = field(default_factory=lambda: os.getenv("AGENT_FALLBACK", "1") not in ("0", "false", "no"))
     google_api_key: str = field(default_factory=lambda: os.getenv("GOOGLE_API_KEY", ""), repr=False)
     gemini_api_key: str = field(default_factory=lambda: os.getenv("GEMINI_API_KEY", ""), repr=False)

@@ -97,7 +97,7 @@ healthy `main` and a feature branch carrying the scenario's buggy commit.
 | IDT | Quality gate, 3-container Docker stack (ui + api + PostgreSQL), GitHub Actions (Linux + Windows + compose e2e), Markdown reports | done |
 | IDT | Deployment on AWS EC2 (AWS CLI + Docker Compose + Caddy HTTPS) | done — see `docs/DEPLOY.md` |
 | UI | Project assistant (chatbot): answers questions about the project and workflow runs | done — offline by default, Claude optional |
-| 5, 7 (LLM) | Multi-agent repair: Google ADK analysts + CrewAI planner/reviewer on Gemini | done (stage 1) — `REPAIR_STRATEGY=agents` |
+| 5, 7 (LLM) | Multi-agent repair: Google ADK analysts + CrewAI planner/reviewer on Gemini | done (stages 1-2: agents + blackboard) — `REPAIR_STRATEGY=agents` |
 
 ## DevOps / IDT pipeline
 
@@ -127,6 +127,13 @@ default stays `rules` (CI, Docker and the EC2 stack need no API key).
 | Plan | CrewAI | Repair Planner, guarded: no test/config edits, valid Python, function must exist | `PlanDraft` |
 | Review | CrewAI | Code Reviewer: approves or returns a corrected plan | `PlanReview` |
 
+- **Blackboard architecture (default, `AGENT_MESSAGING=blackboard`):** the agents never call each other. They
+  share one blackboard (`app/agents/blackboard.py`): each agent declares what it reads and what it posts, and a
+  controller runs whichever agent's inputs are on the board and whose output is not. Guardrails check posts; a
+  rejected post is retracted and the feedback is posted for the agent's retry. Every post (author, framework,
+  time, content) is saved with the workflow and shown in the attempt's **Blackboard** panel.
+  `AGENT_MESSAGING=direct` uses point-to-point hand-off instead (ADK session state, then CrewAI task context)
+  for comparison.
 - Agents work only from an evidence package built from the real run (`app/agents/evidence.py`): failing tests,
   tracebacks, the diff, current and baseline code, earlier attempts.
 - Agents name a function and write its new source; the exact text replaced is taken from the repository, so

@@ -1,8 +1,10 @@
-"""CrewAI planning crew: Repair Planner -> Code Reviewer (sequential process).
+"""CrewAI agents: Repair Planner and Code Reviewer.
 
-The planner drafts a fix; a task guardrail checks it against the repository and sends problems
-back for a retry. The reviewer then accepts the draft or returns a corrected plan, which is
-guarded the same way.
+* direct     - one sequential crew; the reviewer gets the planner's draft through CrewAI task
+               `context`, and task guardrails send problems back to the agent for a retry.
+* blackboard - each agent runs as its own single-task crew (`run_plan_task`, `run_review_task`)
+               with inputs read from the shared blackboard; the blackboard controller runs the
+               guardrail and posts its feedback to the board for the planner's next try.
 """
 
 from __future__ import annotations
@@ -47,6 +49,35 @@ failing test pass. Otherwise set approved=false, list the issues and return a co
 {evidence}"""
 
 
+PLAN_FEEDBACK = """
+
+GUARDRAIL FEEDBACK ON YOUR PREVIOUS DRAFT (it was rejected - fix every point):
+{feedback}"""
+
+REVIEW_DRAFT = """
+
+DRAFT TO REVIEW (posted on the blackboard by the Repair Planner):
+{draft}"""
+
+ROLES = {
+    "Repair Planner": ("Propose the smallest source-code change that makes the failing tests pass",
+                       "A careful Python engineer who fixes regressions without touching tests."),
+    "Code Reviewer": ("Reject fixes that are not minimal, not grounded in the evidence, or that edit tests",
+                      "A strict reviewer who checks every change against the failing tests and the diff."),
+}
+
+
+def _agent(role: str, llm) -> Agent:
+    goal, backstory = ROLES[role]
+    return Agent(role=role, goal=goal, backstory=backstory, llm=llm, allow_delegation=False, max_iter=3,
+                 verbose=False)
+
+
+def _llm(llm):
+    model_name = llm if isinstance(llm, str) else getattr(llm, "model", type(llm).__name__)
+    return (LLM(model=f"gemini/{llm}", temperature=0) if isinstance(llm, str) else llm), model_name
+
+
 def _guard(extract):
     def guard(output):
         try:
@@ -63,18 +94,7 @@ def _as(model):
 
 
 def build_crew(llm, repo_dir: Path, on_task=None) -> Crew:
-    planner = Agent(
-        role="Repair Planner",
-        goal="Propose the smallest source-code change that makes the failing tests pass",
-        backstory="A careful Python engineer who fixes regressions without touching tests.",
-        llm=llm, allow_delegation=False, max_iter=3, verbose=False,
-    )
-    reviewer = Agent(
-        role="Code Reviewer",
-        goal="Reject fixes that are not minimal, not grounded in the evidence, or that edit tests",
-        backstory="A strict reviewer who checks every change against the failing tests and the diff.",
-        llm=llm, allow_delegation=False, max_iter=3, verbose=False,
-    )
+    planner, reviewer = _agent("Repair Planner", llm), _agent("Code Reviewer", llm)
     plan_guard, review_guard = _guard(_as(PlanDraft)), _guard(lambda o: _as(PlanReview)(o).final_plan)
     plan_guard.repo_dir = review_guard.repo_dir = repo_dir
     plan = Task(name="draft repair plan", description=PLAN_TASK, expected_output="A PlanDraft with complete function sources",
@@ -89,9 +109,7 @@ def build_crew(llm, repo_dir: Path, on_task=None) -> Crew:
 def run_planner(evidence: str, investigation: InvestigationReport, root_cause: RootCauseReport,
                 repo_dir: Path, llm, records: list[AgentRecord]) -> PlanReview:
     """Run Planner -> Reviewer. `llm` is a model name (e.g. gemini-3.1-flash-lite) or a CrewAI LLM."""
-    model_name = llm if isinstance(llm, str) else getattr(llm, "model", type(llm).__name__)
-    if isinstance(llm, str):
-        llm = LLM(model=f"gemini/{llm}", temperature=0)
+    llm, model_name = _llm(llm)
     marks = [time.monotonic()]
 
     def on_task(output):
@@ -112,3 +130,39 @@ def run_planner(evidence: str, investigation: InvestigationReport, root_cause: R
         crew_recs[-1].message += " (tokens: whole crew)"
     review = result.pydantic if isinstance(result.pydantic, PlanReview) else PlanReview.model_validate_json(result.raw)
     return review
+
+
+def _run_single(role: str, name: str, description: str, expected: str, output_model, inputs: dict, llm,
+                records: list[AgentRecord]):
+    llm, model_name = _llm(llm)
+    agent = _agent(role, llm)
+    task = Task(name=name, description=description, expected_output=expected, agent=agent,
+                output_pydantic=output_model)
+    start = time.monotonic()
+    result = with_retries(lambda: Crew(agents=[agent], tasks=[task], process=Process.sequential,
+                                       verbose=False).kickoff(inputs=inputs),
+                          agent=role, framework="crewai", records=records)
+    usage = result.token_usage
+    records.append(AgentRecord(agent=role, framework="crewai", model=model_name,
+                               seconds=round(time.monotonic() - start, 2),
+                               prompt_tokens=(usage.prompt_tokens or 0) if usage else 0,
+                               output_tokens=(usage.completion_tokens or 0) if usage else 0,
+                               message=f"task done: {name}"))
+    return result.pydantic if isinstance(result.pydantic, output_model) else output_model.model_validate_json(result.raw)
+
+
+def run_plan_task(evidence: str, investigation_summary: str, root_cause_json: str, feedback: list[str] | None,
+                  llm, records: list[AgentRecord]) -> PlanDraft:
+    """Repair Planner as a single-task crew (blackboard mode). `feedback` = guardrail problems, if any."""
+    description = PLAN_TASK + (PLAN_FEEDBACK if feedback else "")
+    inputs = {"evidence": evidence, "root_cause": root_cause_json, "investigation": investigation_summary,
+              "feedback": "\n".join(f"- {p}" for p in feedback or [])}
+    return _run_single("Repair Planner", "draft repair plan", description,
+                       "A PlanDraft with complete function sources", PlanDraft, inputs, llm, records)
+
+
+def run_review_task(evidence: str, draft_json: str, llm, records: list[AgentRecord]) -> PlanReview:
+    """Code Reviewer as a single-task crew (blackboard mode): reviews the draft read from the board."""
+    return _run_single("Code Reviewer", "review plan", REVIEW_TASK + REVIEW_DRAFT,
+                       "A PlanReview with the final plan", PlanReview,
+                       {"evidence": evidence, "draft": draft_json}, llm, records)

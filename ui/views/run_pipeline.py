@@ -21,8 +21,17 @@ STRATEGY_HELP = {
 }
 
 
-def _strategy_picker(api) -> tuple[str, bool]:
-    """Rule-based vs AI-agent analysis. Returns (strategy id, can run)."""
+MESSAGING_HELP = {
+    "blackboard": "All agents share one **blackboard**: each reads what it needs from the board and posts its "
+                  "result there; a controller picks who runs next from what is on the board. Guardrail feedback "
+                  "is posted to the board too. The whole board is saved with the workflow.",
+    "direct": "**Direct hand-off**: each agent passes its output straight to the next one (ADK session state, then "
+              "CrewAI task context). No shared board - kept to compare against the blackboard.",
+}
+
+
+def _strategy_picker(api) -> tuple[str, str | None, bool]:
+    """Rule-based vs AI-agent analysis (+ how agents share context). Returns (strategy, messaging, can run)."""
     options = {o["id"]: o for o in api.strategies()}
     default = next((o["id"] for o in options.values() if o["default"]), "rules")
     choice = st.segmented_control(
@@ -33,7 +42,14 @@ def _strategy_picker(api) -> tuple[str, bool]:
     st.caption(STRATEGY_HELP[choice] + (f" Model: `{opt['model']}`." if opt.get("model") else ""))
     if not opt["available"]:
         st.warning(f"**{opt['label']} unavailable on this backend:** {opt['reason']}.")
-    return choice, opt["available"]
+    messaging = None
+    if choice == "agents" and opt["available"] and opt.get("messaging"):
+        modes = {m["id"]: m for m in opt["messaging"]}
+        messaging = st.radio("How do the agents share context?", list(modes), horizontal=True, key="messaging",
+                             index=next((i for i, m in enumerate(modes.values()) if m["default"]), 0),
+                             format_func=lambda m: ("🧩 " if m == "blackboard" else "🔗 ") + modes[m]["label"])
+        st.caption(MESSAGING_HELP[messaging])
+    return choice, messaging, opt["available"]
 
 
 def render() -> None:
@@ -68,13 +84,13 @@ def render() -> None:
                     else:
                         st.code(e["new"], language="python")
 
-    strategy, ready = _strategy_picker(api)
+    strategy, messaging, ready = _strategy_picker(api)
     if st.button("3. ▶️ Run the pipeline", type="primary", width="stretch", disabled=not ready):
         label = "AI agents are analysing the failure (about 20-40 s)…" if strategy == "agents" else \
             "Backend is running the pipeline…"
         with st.status(label, expanded=True) as status:
             try:
-                res = api.run(scenario_id, strategy=strategy)
+                res = api.run(scenario_id, strategy=strategy, messaging=messaging)
             except APIError as exc:
                 status.update(label=f"Failed: {exc.detail}", state="error")
                 st.stop()

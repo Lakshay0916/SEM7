@@ -90,3 +90,35 @@ def test_crewai_planner_guardrail_retries_then_reviewer_approves(tmp_path):
     assert isinstance(review.final_plan, PlanDraft) and review.final_plan.edits[0].file == "src/calculator.py"
     assert any("not tests" in c or "Fix these problems" in c for c in llm.calls)  # guardrail feedback was sent
     assert [r.agent for r in records if r.framework == "crewai"] == ["Repair Planner", "Code Reviewer"]
+
+
+def test_blackboard_mode_runs_each_framework_agent_on_its_own(tmp_path, monkeypatch):
+    """Full blackboard run with the real ADK + CrewAI runners: 4 separate agent calls, board in order."""
+    import app.agents.strategy as strat
+    from app.agents.blackboard import Blackboard, BlackboardController
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src" / "calculator.py").write_text('def add(a, b):\n    """Return the sum of a and b."""\n'
+                                                    "    return a - b\n")
+    (tmp_path / "tests" / "test_calculator.py").write_text("def test_add():\n    assert True\n")
+    gemini, crew = FakeGemini(), FakeCrewLLM(model="fake-crew")
+    gemini.requests.clear()
+    crew.calls.clear()
+    monkeypatch.setattr("app.agents.crew_planner._llm", lambda llm: (crew, "fake-crew"))
+    sources = strat.default_sources(model=gemini)
+
+    bb, records = Blackboard(), []
+    bb.post("evidence", "EVIDENCE: test_add fails, diff shows return a - b", "orchestrator", "system")
+    review = BlackboardController(sources, strat.plan_guards(tmp_path)).run_until(bb, "review", records)
+
+    assert review["approved"] and review["final_plan"]["edits"][0]["file"] == "src/calculator.py"
+    assert [(e.key, e.framework, e.retracted) for e in bb.entries] == [
+        ("evidence", "system", False), ("investigation", "adk", False), ("root_cause", "adk", False),
+        ("plan_draft", "crewai", True),            # fake planner edits a test first -> guard rejects
+        ("feedback:plan_draft", "guardrail", False), ("plan_draft", "crewai", False), ("review", "crewai", False)]
+    assert len(gemini.requests) == 2                 # one ADK call per analyst
+    assert any("GUARDRAIL FEEDBACK" in c for c in crew.calls)        # planner's retry saw the board's feedback
+    assert any("DRAFT TO REVIEW" in c for c in crew.calls)           # reviewer read the draft from the board
+    assert {r.agent for r in records if r.status == "ok"} == {"investigator", "root_cause_analyst",
+                                                              "Repair Planner", "Code Reviewer"}

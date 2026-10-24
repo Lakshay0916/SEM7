@@ -41,7 +41,7 @@ from app.orchestration.state import check_transition
 ARTIFACT_KINDS = {
     "risk_assessment", "pipeline_run", "failure_event", "quality_gate", "investigation", "rag_retrieval",
     "root_cause", "repair_plan", "approval", "repair_attempt", "test_run", "reflection",
-    "pull_request", "strategy_choice",
+    "pull_request", "strategy_choice", "blackboard",
 }
 
 metadata = MetaData()
