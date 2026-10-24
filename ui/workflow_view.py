@@ -130,15 +130,17 @@ def _attempt_block(tv: TraceView, n: int) -> None:
                        if refl["regressions"] else ""))
 
 
-FRAMEWORK_ICON = {"system": "⚙️", "adk": "🔷", "crewai": "🟧", "guardrail": "🛡️", "rule-based": "📏"}
+FRAMEWORK_ICON = {"system": "⚙️", "adk": "🔷", "crewai": "🟧", "mcp": "🔧", "guardrail": "🛡️", "rule-based": "📏"}
 
 
 def _blackboard(board: list[dict]) -> None:
     """The shared blackboard the agents collaborated through, in posting order."""
     agents = sorted({e["author"] for e in board if e["framework"] in ("adk", "crewai")})
-    with st.expander(f"🧩 Blackboard — {len(board)} posts by {len(agents)} agents (shared state)", expanded=False):
+    calls = sum(e["framework"] == "mcp" for e in board)
+    with st.expander(f"🧩 Blackboard — {len(board)} posts by {len(agents)} agents"
+                     + (f", {calls} MCP tool calls" if calls else "") + " (shared state)", expanded=False):
         st.caption("Agents never call each other: each read its inputs from this board and posted its result here; "
-                   "the controller picked who ran next. Struck-through posts were rejected by a guardrail and "
+                   "the controller picked who ran next. 🔧 posts are MCP tool calls an agent made while working. Struck-through posts were rejected by a guardrail and "
                    "retracted - the agent then retried with the feedback posted after it.")
         for e in board:
             icon = FRAMEWORK_ICON.get(e["framework"], "•")

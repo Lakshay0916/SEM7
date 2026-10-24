@@ -134,6 +134,18 @@ default stays `rules` (CI, Docker and the EC2 stack need no API key).
   time, content) is saved with the workflow and shown in the attempt's **Blackboard** panel.
   `AGENT_MESSAGING=direct` uses point-to-point hand-off instead (ADK session state, then CrewAI task context)
   for comparison.
+- **MCP tools (`AGENT_TOOLS=1`):** two MCP servers (`app/mcp_servers/`), launched over stdio and scoped to the one
+  repair, so tools never see other paths or databases:
+
+  | Server | Tool | Used by |
+  |---|---|---|
+  | `sem7-risk` (ML) | `score_change_risk` - the trained risk model on the commit; `risk_model_card` | Investigator |
+  | `sem7-ci` | `past_failures` - database lookup of earlier root causes and fixes | Investigator |
+  | `sem7-ci` | `read_source` - current / baseline / commit version of a file or function | Root-cause, Planner |
+  | `sem7-ci` | `run_tests_with_patch` - dry-runs a candidate fix in a throwaway copy with the real tests | Planner, Reviewer |
+
+  ADK connects with `McpToolset`, CrewAI with `Agent(mcps=[MCPServerStdio(...)])`; each call (agent, tool, time,
+  result) is recorded via ADK tool callbacks / CrewAI's event bus and posted to the blackboard.
 - Agents work only from an evidence package built from the real run (`app/agents/evidence.py`): failing tests,
   tracebacks, the diff, current and baseline code, earlier attempts.
 - Agents name a function and write its new source; the exact text replaced is taken from the repository, so

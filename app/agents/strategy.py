@@ -24,6 +24,7 @@ from app.agents.blackboard import Blackboard, BlackboardController, BlackboardEn
 from app.agents.evidence import build_evidence
 from app.agents.guardrails import check_draft, to_repair_plan
 from app.agents.models import AgentRecord, PlanDraft, PlanReview
+from app.mcp_servers.tools import RepairScope
 from app.config import settings
 from app.healing.rules import RuleBasedStrategy
 from app.healing.strategy import RepairContext
@@ -37,16 +38,24 @@ MESSAGING = ("blackboard", "direct")
 # --------------------------------------------------------------------------- direct (point-to-point)
 
 
-def _default_analysts(evidence: str, records: list[AgentRecord]):
+def scope_of(ctx: RepairContext) -> RepairScope | None:
+    """The repair the agents' MCP tools are scoped to (None when tools are switched off)."""
+    if not settings.agent_tools:
+        return None
+    return RepairScope(ctx.repo_dir, ctx.failure.diff.base_sha, ctx.failure.commit_sha)
+
+
+def _default_analysts(evidence: str, records: list[AgentRecord], scope=None):
     from app.agents.adk_analysts import run_analysts
 
-    return run_analysts(evidence, settings.agent_model, records)
+    return run_analysts(evidence, settings.agent_model, records, scope)
 
 
 def _default_planner(evidence, investigation, root_cause, ctx, records):
     from app.agents.crew_planner import run_planner
 
-    review = run_planner(evidence, investigation, root_cause, ctx.repo_dir, settings.agent_model, records)
+    review = run_planner(evidence, investigation, root_cause, ctx.repo_dir, settings.agent_model, records,
+                         scope_of(ctx))
     if not review.approved:
         records.append(AgentRecord(agent="Code Reviewer", framework="crewai", status="ok",
                                    message="reviewer corrected the draft: " + "; ".join(review.issues)[:300]))
@@ -56,34 +65,37 @@ def _default_planner(evidence, investigation, root_cause, ctx, records):
 # --------------------------------------------------------------------------- blackboard
 
 
-def default_sources(model: str | None = None) -> list[KnowledgeSource]:
-    """The four agents as blackboard knowledge sources (ADK analysts, CrewAI planner and reviewer)."""
+def default_sources(model: str | None = None, scope: RepairScope | None = None) -> list[KnowledgeSource]:
+    """The four agents as blackboard knowledge sources (ADK analysts, CrewAI planner and reviewer).
+
+    With a `scope`, each agent can call its MCP tools (see app/agents/mcp_tools.py)."""
     model = model or settings.agent_model
 
     def investigator(bb, records):
         from app.agents.adk_analysts import run_agent
 
-        inv = run_agent("investigator", {"evidence": bb.get("evidence")}, model, records)
+        inv = run_agent("investigator", {"evidence": bb.get("evidence")}, model, records, scope)
         return inv, inv.failure_summary
 
     def root_cause_analyst(bb, records):
         from app.agents.adk_analysts import run_agent
 
         rc = run_agent("root_cause_analyst", {"evidence": bb.get("evidence"),
-                                              "investigation": json.dumps(bb.get("investigation"))}, model, records)
+                                              "investigation": json.dumps(bb.get("investigation"))}, model, records,
+                       scope)
         return rc, f"{rc.root_cause} (confidence {rc.confidence:.0%})"
 
     def planner(bb, records):
         from app.agents.crew_planner import run_plan_task
 
         draft = run_plan_task(bb.get("evidence"), bb.get("investigation")["failure_summary"],
-                              json.dumps(bb.get("root_cause")), bb.get("feedback:plan_draft"), model, records)
+                              json.dumps(bb.get("root_cause")), bb.get("feedback:plan_draft"), model, records, scope)
         return draft, draft.summary
 
     def reviewer(bb, records):
         from app.agents.crew_planner import run_review_task
 
-        review = run_review_task(bb.get("evidence"), json.dumps(bb.get("plan_draft")), model, records)
+        review = run_review_task(bb.get("evidence"), json.dumps(bb.get("plan_draft")), model, records, scope)
         verdict = "approved" if review.approved else "corrected: " + "; ".join(review.issues)
         return review, f"{verdict} - {review.final_plan.summary}"
 
@@ -140,7 +152,7 @@ class AgenticStrategy:
                                         message=f"{type(exc).__name__}: {str(exc)[:200]} - using rule-based {step}"))
 
     def _controller(self, ctx: RepairContext) -> BlackboardController:
-        return BlackboardController(self.sources or default_sources(), plan_guards(ctx.repo_dir))
+        return BlackboardController(self.sources or default_sources(scope=scope_of(ctx)), plan_guards(ctx.repo_dir))
 
     # ------------------------------------------------------------------ interface
 
@@ -156,7 +168,8 @@ class AgenticStrategy:
                 inv = InvestigationReport.model_validate(bb.get("investigation"))
                 rc = RootCauseReport.model_validate(bb.get("root_cause"))
             else:
-                inv, rc = self.analysts(evidence, self.records)
+                inv, rc = (self.analysts(evidence, self.records, scope_of(ctx)) if self.analysts is _default_analysts
+                           else self.analysts(evidence, self.records))
         except Exception as exc:
             self._fail("analysis", exc)
             self._cache[ctx.attempt] = (evidence, None)

@@ -122,3 +122,81 @@ def test_blackboard_mode_runs_each_framework_agent_on_its_own(tmp_path, monkeypa
     assert any("DRAFT TO REVIEW" in c for c in crew.calls)           # reviewer read the draft from the board
     assert {r.agent for r in records if r.status == "ok"} == {"investigator", "root_cause_analyst",
                                                               "Repair Planner", "Code Reviewer"}
+
+
+# --------------------------------------------------------------------------- MCP (real stdio servers)
+
+
+@pytest.fixture
+def mcp_scope(tmp_path, monkeypatch):
+    pytest.importorskip("mcp")
+    from dataclasses import replace
+
+    import app.ci.simulator as sim_mod
+    import app.orchestration.store as store_mod
+    from app.ci.scenarios import get_scenario
+    from app.ci.simulator import create_sandbox
+    from app.git.repo import GitRepo
+    from app.mcp_servers.tools import RepairScope
+
+    patched = replace(store_mod.settings, database_url=f"sqlite:///{tmp_path / 'm.sqlite3'}",
+                      workspace_dir=tmp_path / "ws")
+    monkeypatch.setattr(store_mod, "settings", patched)
+    monkeypatch.setattr(sim_mod, "settings", patched)
+    monkeypatch.setenv("DATABASE_URL", patched.database_url)
+    repo = create_sandbox(get_scenario("simple_bug"))
+    g = GitRepo(repo)
+    return RepairScope(repo, g._run("rev-parse", "main").strip(), g.head_sha())
+
+
+def test_mcp_servers_speak_the_protocol(mcp_scope):
+    import asyncio
+    import sys
+
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    from app.agents.mcp_tools import SERVERS, server_env
+    from app.config import PROJECT_ROOT
+
+    async def call(server, tool, args):
+        params = StdioServerParameters(command=sys.executable, args=["-m", SERVERS[server]],
+                                       env=server_env(mcp_scope), cwd=str(PROJECT_ROOT))
+        async with stdio_client(params) as (r, w), ClientSession(r, w) as s:
+            await s.initialize()
+            names = [t.name for t in (await s.list_tools()).tools]
+            res = await s.call_tool(tool, args)
+            return names, json.loads(res.content[0].text)
+
+    names, risk = asyncio.run(call("sem7-risk", "score_change_risk", {}))
+    assert names == ["score_change_risk", "risk_model_card"] and risk["risk_level"] in {"LOW", "MEDIUM", "HIGH"}
+    names, dry = asyncio.run(call("sem7-ci", "run_tests_with_patch",
+                                  {"path": "src/calculator.py", "function": "add", "new_source": GOOD_ADD}))
+    assert names == ["read_source", "run_tests_with_patch", "past_failures"] and dry["status"] == "PASS"
+
+
+class ToolCallingGemini(FakeGemini):
+    """First turn: call the MCP tool `score_change_risk`; after the tool answers: return the report."""
+
+    async def generate_content_async(self, llm_request, stream=False):
+        self.requests.append(llm_request)
+        answered = any(p.function_response for c in llm_request.contents for p in (c.parts or []))
+        if not answered:
+            part = types.Part(function_call=types.FunctionCall(name="score_change_risk", args={}))
+        else:
+            part = types.Part(text=json.dumps(INVESTIGATION))
+        yield LlmResponse(content=types.Content(role="model", parts=[part]))
+
+
+def test_adk_agent_calls_an_mcp_tool_and_the_call_is_recorded(mcp_scope):
+    from app.agents.adk_analysts import run_agent
+
+    model, records = ToolCallingGemini(), []
+    model.requests.clear()
+    inv = run_agent("investigator", {"evidence": "EVIDENCE"}, model, records, scope=mcp_scope)
+    assert isinstance(inv, InvestigationReport)
+    tool_calls = [r for r in records if r.framework == "mcp"]
+    assert [r.agent for r in tool_calls] == ["investigator → score_change_risk"]
+    assert tool_calls[0].status == "ok" and '"risk_level"' in tool_calls[0].message
+    tools_offered = {d.name for t in model.requests[0].config.tools for d in (t.function_declarations or [])}
+    assert {"score_change_risk", "past_failures"} <= tools_offered and "read_source" not in tools_offered

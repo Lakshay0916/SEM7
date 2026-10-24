@@ -23,6 +23,7 @@ from crewai import LLM, Agent, Crew, Process, Task  # noqa: E402
 warnings.filterwarnings("ignore", message="function callbacks cannot be serialized")
 
 from app.agents.guardrails import check_draft  # noqa: E402
+from app.agents.mcp_tools import crew_mcps, crew_tool_events, hint  # noqa: E402
 from app.agents.models import AgentRecord, PlanDraft, PlanReview  # noqa: E402
 from app.agents.retry import with_retries  # noqa: E402
 from app.models.schemas import InvestigationReport, RootCauseReport  # noqa: E402
@@ -67,10 +68,11 @@ ROLES = {
 }
 
 
-def _agent(role: str, llm) -> Agent:
+def _agent(role: str, llm, scope=None, records: list[AgentRecord] | None = None) -> Agent:
+    """One CrewAI agent; with a repair `scope` it gets its MCP tools and a step callback recording tool use."""
     goal, backstory = ROLES[role]
-    return Agent(role=role, goal=goal, backstory=backstory, llm=llm, allow_delegation=False, max_iter=3,
-                 verbose=False)
+    return Agent(role=role, goal=goal, backstory=backstory, llm=llm, allow_delegation=False,
+                 max_iter=8 if scope is not None else 3, verbose=False, mcps=crew_mcps(role, scope) or None)
 
 
 def _llm(llm):
@@ -93,13 +95,13 @@ def _as(model):
     return lambda out: out.pydantic if isinstance(out.pydantic, model) else model.model_validate_json(out.raw)
 
 
-def build_crew(llm, repo_dir: Path, on_task=None) -> Crew:
-    planner, reviewer = _agent("Repair Planner", llm), _agent("Code Reviewer", llm)
+def build_crew(llm, repo_dir: Path, on_task=None, scope=None, records=None) -> Crew:
+    planner, reviewer = _agent("Repair Planner", llm, scope, records), _agent("Code Reviewer", llm, scope, records)
     plan_guard, review_guard = _guard(_as(PlanDraft)), _guard(lambda o: _as(PlanReview)(o).final_plan)
     plan_guard.repo_dir = review_guard.repo_dir = repo_dir
-    plan = Task(name="draft repair plan", description=PLAN_TASK, expected_output="A PlanDraft with complete function sources",
+    plan = Task(name="draft repair plan", description=PLAN_TASK + hint("Repair Planner", scope), expected_output="A PlanDraft with complete function sources",
                 agent=planner, output_pydantic=PlanDraft, guardrail=plan_guard, guardrail_max_retries=2)
-    review = Task(name="review plan", description=REVIEW_TASK, expected_output="A PlanReview with the final plan",
+    review = Task(name="review plan", description=REVIEW_TASK + hint("Code Reviewer", scope), expected_output="A PlanReview with the final plan",
                   agent=reviewer, context=[plan], output_pydantic=PlanReview, guardrail=review_guard,
                   guardrail_max_retries=2)
     return Crew(agents=[planner, reviewer], tasks=[plan, review], process=Process.sequential,
@@ -107,7 +109,7 @@ def build_crew(llm, repo_dir: Path, on_task=None) -> Crew:
 
 
 def run_planner(evidence: str, investigation: InvestigationReport, root_cause: RootCauseReport,
-                repo_dir: Path, llm, records: list[AgentRecord]) -> PlanReview:
+                repo_dir: Path, llm, records: list[AgentRecord], scope=None) -> PlanReview:
     """Run Planner -> Reviewer. `llm` is a model name (e.g. gemini-3.1-flash-lite) or a CrewAI LLM."""
     llm, model_name = _llm(llm)
     marks = [time.monotonic()]
@@ -120,7 +122,11 @@ def run_planner(evidence: str, investigation: InvestigationReport, root_cause: R
 
     inputs = {"evidence": evidence, "root_cause": root_cause.model_dump_json(),
               "investigation": investigation.failure_summary}
-    result = with_retries(lambda: build_crew(llm, repo_dir, on_task).kickoff(inputs=inputs),
+    def kickoff():
+        with crew_tool_events(records):
+            return build_crew(llm, repo_dir, on_task, scope, records).kickoff(inputs=inputs)
+
+    result = with_retries(kickoff,
                           agent="crewai_planning", framework="crewai", records=records)
     usage = result.token_usage
     crew_recs = [r for r in records if r.framework == "crewai" and r.status == "ok"]
@@ -133,15 +139,17 @@ def run_planner(evidence: str, investigation: InvestigationReport, root_cause: R
 
 
 def _run_single(role: str, name: str, description: str, expected: str, output_model, inputs: dict, llm,
-                records: list[AgentRecord]):
+                records: list[AgentRecord], scope=None):
     llm, model_name = _llm(llm)
-    agent = _agent(role, llm)
-    task = Task(name=name, description=description, expected_output=expected, agent=agent,
+    agent = _agent(role, llm, scope, records)
+    task = Task(name=name, description=description + hint(role, scope), expected_output=expected, agent=agent,
                 output_pydantic=output_model)
     start = time.monotonic()
-    result = with_retries(lambda: Crew(agents=[agent], tasks=[task], process=Process.sequential,
-                                       verbose=False).kickoff(inputs=inputs),
-                          agent=role, framework="crewai", records=records)
+    def kickoff():
+        with crew_tool_events(records, role):
+            return Crew(agents=[agent], tasks=[task], process=Process.sequential, verbose=False).kickoff(inputs=inputs)
+
+    result = with_retries(kickoff, agent=role, framework="crewai", records=records)
     usage = result.token_usage
     records.append(AgentRecord(agent=role, framework="crewai", model=model_name,
                                seconds=round(time.monotonic() - start, 2),
@@ -152,17 +160,17 @@ def _run_single(role: str, name: str, description: str, expected: str, output_mo
 
 
 def run_plan_task(evidence: str, investigation_summary: str, root_cause_json: str, feedback: list[str] | None,
-                  llm, records: list[AgentRecord]) -> PlanDraft:
+                  llm, records: list[AgentRecord], scope=None) -> PlanDraft:
     """Repair Planner as a single-task crew (blackboard mode). `feedback` = guardrail problems, if any."""
     description = PLAN_TASK + (PLAN_FEEDBACK if feedback else "")
     inputs = {"evidence": evidence, "root_cause": root_cause_json, "investigation": investigation_summary,
               "feedback": "\n".join(f"- {p}" for p in feedback or [])}
     return _run_single("Repair Planner", "draft repair plan", description,
-                       "A PlanDraft with complete function sources", PlanDraft, inputs, llm, records)
+                       "A PlanDraft with complete function sources", PlanDraft, inputs, llm, records, scope)
 
 
-def run_review_task(evidence: str, draft_json: str, llm, records: list[AgentRecord]) -> PlanReview:
+def run_review_task(evidence: str, draft_json: str, llm, records: list[AgentRecord], scope=None) -> PlanReview:
     """Code Reviewer as a single-task crew (blackboard mode): reviews the draft read from the board."""
     return _run_single("Code Reviewer", "review plan", REVIEW_TASK + REVIEW_DRAFT,
                        "A PlanReview with the final plan", PlanReview,
-                       {"evidence": evidence, "draft": draft_json}, llm, records)
+                       {"evidence": evidence, "draft": draft_json}, llm, records, scope)

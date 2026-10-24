@@ -17,6 +17,7 @@ from google.adk.agents import LlmAgent, SequentialAgent
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
+from app.agents.mcp_tools import adk_tool_callbacks, adk_toolsets, hint
 from app.agents.models import AgentRecord
 from app.agents.retry import with_retries
 from app.models.schemas import InvestigationReport, RootCauseReport
@@ -54,20 +55,30 @@ SPECS = {
 }
 
 
-def build_agent(name: str, model) -> LlmAgent:
+def build_agent(name: str, model, scope=None, records: list[AgentRecord] | None = None) -> LlmAgent:
+    """One ADK agent; with a repair `scope` it gets its MCP tools and tool-call monitoring callbacks."""
     description, instruction, schema, key = SPECS[name]
-    return LlmAgent(name=name, model=model, description=description, instruction=instruction,
-                    output_schema=schema, output_key=key,
+    before, after = adk_tool_callbacks(name, records if records is not None else [])
+    return LlmAgent(name=name, model=model, description=description, instruction=instruction + hint(name, scope),
+                    output_schema=schema, output_key=key, tools=adk_toolsets(name, scope),
+                    before_tool_callback=before, after_tool_callback=after,
                     generate_content_config=types.GenerateContentConfig(temperature=0))
 
 
-def build_analysts(model) -> SequentialAgent:
-    return SequentialAgent(name="adk_analysts",
-                           sub_agents=[build_agent("investigator", model), build_agent("root_cause_analyst", model)])
+def build_analysts(model, scope=None, records=None) -> SequentialAgent:
+    return SequentialAgent(name="adk_analysts", sub_agents=[build_agent("investigator", model, scope, records),
+                                                            build_agent("root_cause_analyst", model, scope, records)])
 
 
 async def _run(agent, state: dict, model_name: str) -> tuple[dict, list[AgentRecord]]:
     runner = InMemoryRunner(agent=agent, app_name=APP)
+    try:
+        return await _drive(runner, state, model_name)
+    finally:
+        await runner.close()  # stops the MCP server subprocesses
+
+
+async def _drive(runner, state: dict, model_name: str) -> tuple[dict, list[AgentRecord]]:
     session = await runner.session_service.create_session(app_name=APP, user_id="pipeline", state=state)
     run_start = time.monotonic()
     started: dict[str, float] = {}
@@ -95,20 +106,22 @@ async def _run(agent, state: dict, model_name: str) -> tuple[dict, list[AgentRec
     return state, records
 
 
-def run_analysts(evidence: str, model, records: list[AgentRecord]) -> tuple[InvestigationReport, RootCauseReport]:
+def run_analysts(evidence: str, model, records: list[AgentRecord], scope=None) -> tuple[InvestigationReport, RootCauseReport]:
     """Run Investigator -> Root-cause on the evidence. `model` is a model name or an ADK BaseLlm."""
     model_name = _name(model)
-    state, recs = with_retries(lambda: asyncio.run(_run(build_analysts(model), {"evidence": evidence}, model_name)),
+    state, recs = with_retries(lambda: asyncio.run(_run(build_analysts(model, scope, records), {"evidence": evidence},
+                                                        model_name)),
                                agent="adk_analysts", framework="adk", records=records)
     records.extend(recs)
     return (InvestigationReport.model_validate(state["investigation"]),
             RootCauseReport.model_validate(state["root_cause"]))
 
 
-def run_agent(name: str, inputs: dict, model, records: list[AgentRecord]):
+def run_agent(name: str, inputs: dict, model, records: list[AgentRecord], scope=None):
     """Run one ADK agent on `inputs` (its instruction placeholders) and return its typed report."""
     _, _, schema, key = SPECS[name]
-    state, recs = with_retries(lambda: asyncio.run(_run(build_agent(name, model), dict(inputs), _name(model))),
+    state, recs = with_retries(lambda: asyncio.run(_run(build_agent(name, model, scope, records), dict(inputs),
+                                                        _name(model))),
                                agent=name, framework="adk", records=records)
     records.extend(recs)
     return schema.model_validate(state[key])

@@ -249,6 +249,20 @@ task context), with no shared board. You choose between them on the Run Pipeline
 selected. In one live comparison the blackboard used about 2.6 times fewer CrewAI prompt tokens, because each
 agent receives only what it needs from the board.
 
+## Which MCP tools do the agents use?
+Two MCP (Model Context Protocol) servers give the agents tools; ADK connects with `McpToolset` and CrewAI with
+`Agent(mcps=[MCPServerStdio(...)])`. `sem7-risk` exposes the trained ML risk model: `score_change_risk` scores
+the commit and `risk_model_card` describes the model's metrics. `sem7-ci` exposes `read_source` (current,
+baseline or commit version of a file or function), `run_tests_with_patch` (dry-runs a candidate fix in a
+throwaway copy of the repository with the real test suite, without changing the repository) and
+`past_failures` (a database lookup of earlier workflows' root causes and fixes). The ADK Investigator uses
+`score_change_risk` and `past_failures`, the ADK Root-cause analyst uses `read_source`, the CrewAI Repair
+Planner uses `read_source` and `run_tests_with_patch`, and the CrewAI Code Reviewer verifies the draft with
+`run_tests_with_patch`. The servers run as subprocesses scoped to one repair (they get only the sandbox
+path and commit IDs, never API keys), paths outside the repository and edits to tests are refused, and
+every tool call (agent, tool, time, result) is recorded and shown as a 🔧 post on the blackboard.
+`AGENT_TOOLS=0` switches the tools off.
+
 ## How do the AI agents work? (ADK and CrewAI)
 The agents only see an evidence package built from the real run: failing tests, error messages and
 tracebacks, the developer's diff, the current and baseline code, and earlier attempts. The ADK
