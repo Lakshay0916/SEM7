@@ -25,7 +25,8 @@ def render() -> None:
         "The analysis is done either by deterministic rules or by LLM agents (Google ADK + CrewAI on Gemini) - "
         "you choose per run on the Run Pipeline page.",
         chips=["🔁 Self-healing loop with human approval", "🧪 Real tests, never faked", "🛡️ AI can't touch main",
-               "🤖 ADK + CrewAI agents", "🚦 Risk-aware quality gate", "🐳 Docker + GitHub Actions"],
+               "🤖 ADK + CrewAI agents (MCP · A2A)", "🚦 Risk-aware quality gate",
+               "🐳 Docker + GitHub Actions", "☁️ Live on AWS EC2"],
     )
 
     health = require_api()

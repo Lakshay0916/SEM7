@@ -22,14 +22,15 @@ AGENTS = "digraph B {" + _STYLE.replace("rankdir=LR", "rankdir=TB; newrank=true"
   fail [label="FailureEvent", fillcolor="#fdeaea", color="#ec9a9a"];
   inv [label="Investigate\\n(rules | ADK agent)"]; rc [label="Root cause\\n(rules | ADK agent)"];
   plan [label="Plan fix\\n(rules | CrewAI crew)"]; appr [label="Human\\napproval", shape=hexagon];
-  rag [label="RAG\\nretrieval", style="rounded,dashed", fillcolor="#fafbfc", color="#b4bcc9", fontcolor="#5b6475"];
+  tools [label="MCP tools\\nrisk model · code · test dry-run\\npast failures", fillcolor="#fafbfc", color="#b4bcc9"];
   rep [label="Repair on\\nai/repair/*"]; test [label="Re-test\\n(real pytest)"];
   pr [label="Pull request\\n(not merged)", fillcolor="#e6f5e6", color="#9fd59f"];
   refl [label="Reflection"];
   { rank=same; fail; inv; rc; plan; }
   { rank=same; appr; rep; test; pr; }
   fail -> inv -> rc -> plan;
-  rag -> rc [style=dashed, label="planned"];
+  inv -> tools [style=dotted, arrowhead=none]; rc -> tools [style=dotted, arrowhead=none];
+  plan -> tools [style=dotted, arrowhead=none, label="agents"];
   plan -> appr; appr -> rep [label="approve"]; rep -> test; test -> pr [label="pass"];
   test -> refl [label="fail"]; refl -> inv [style=dashed, label="retry (max 3)"];
   appr -> inv [style=dashed, label="reject"];
@@ -42,7 +43,11 @@ DEPLOY = "digraph D {" + _STYLE + """
   api [label="api container\\nFastAPI · :8000\\npipeline · risk · self-healing · git"];
   db [label="db container\\nPostgreSQL 16\\nworkflows · events · artifacts", shape=cylinder];
   ws [label="workspace volume\\nsandbox repos", shape=folder, fillcolor="#fafbfc", color="#b4bcc9"];
+  adk [label="agent-adk container\\nGoogle ADK · :8101\\ninvestigator · root cause"];
+  crew [label="agent-crew container\\nCrewAI · :8102\\nplanner · reviewer"];
   user -> ui [label="HTTP"]; ui -> api [label="REST / JSON"]; api -> db [label="SQL"]; api -> ws;
+  api -> adk [label="A2A"]; api -> crew [label="A2A"]; adk -> crew [style=dashed, label="A2A (direct)"];
+  adk -> ws [style=dotted, arrowhead=none]; crew -> ws [style=dotted, arrowhead=none];
 }"""
 
 _DARK = {  # light-diagram color -> dark-diagram color
@@ -64,17 +69,17 @@ def render() -> None:
     st.title("How it works")
     hero(
         "One pipeline, clear responsibilities, a human in the loop",
-        "Solid boxes run today. Investigation, root cause and planning are done either by rules or by LLM agents "
-        "(Google ADK + CrewAI) through the same interface - you pick per run; RAG (dashed) is planned. The hexagon is the human "
-        "approval gate - no code is changed without it.",
-        chips=["ML predicts", "RAG retrieves", "LLM reasons", "agents act", "tests verify"],
+        "Every box runs today. Investigation, root cause and planning are done either by rules or by LLM agents "
+        "(Google ADK + CrewAI) through the same interface - you pick per run. The agents share a blackboard, use MCP "
+        "tools and run as A2A services. The hexagon is the human approval gate - no code is changed without it.",
+        chips=["ML predicts", "tools fetch facts", "LLM reasons", "agents act", "tests verify"],
     )
     st.markdown("**Part 1 — built today:** commit → analysis → risk → real tests")
     st.graphviz_chart(_themed(BUILT), width="stretch")
     st.markdown("**Part 2 — built (rules or AI agents):** the human-approved self-healing loop")
     st.graphviz_chart(_themed(AGENTS), width="stretch")
-    st.caption("Solid = built · dashed = planned · red = failure evidence · green = validated outcome · "
-               "hexagon = human approval gate")
+    st.caption("Dashed arrows = loops back · dotted = MCP tools the agents call · red = failure evidence · "
+               "green = validated outcome · hexagon = human approval gate")
 
     st.markdown("#### Who does what")
     st.markdown(
@@ -89,18 +94,26 @@ def render() -> None:
         "✅ Built |\n"
         "| Human | Approves or rejects every proposed fix | Final authority | ✅ Built |\n"
         "| State machine + store | Tracks every step, saves every output | Blocks illegal steps | ✅ Built |\n"
-        "| RAG | Retrieves relevant project code, tests and docs | Never claims documents it did not retrieve "
-        "| ⏳ Agentic AI |\n"
-        "| LLM agents | Reason over evidence, propose richer fixes | Same interface, gate and tests | ⏳ Agentic AI |"
+        "| LLM agents | ADK investigator + root cause, CrewAI planner + reviewer reason over the evidence | Same "
+        "interface, gate and tests; fall back to rules on failure | ✅ Built |\n"
+        "| Blackboard | Shared board the agents read from and post to; guards retract unsafe posts | Agents never "
+        "call each other directly (direct hand-off is the alternative mode) | ✅ Built |\n"
+        "| MCP tool servers | Risk model, code reader, test dry-run, past failures | Scoped to the one repo being "
+        "repaired; no test edits, no API keys | ✅ Built |\n"
+        "| A2A agent services | ADK and CrewAI agents as separate services with Agent Cards | Return typed data only "
+        "| ✅ Built |"
     )
 
-    st.markdown("#### Deployment: three containers")
+    st.markdown("#### Deployment: containers")
     st.graphviz_chart(_themed(DEPLOY), width="stretch")
     st.markdown(
         "- **ui** — Streamlit. Contains no pipeline code: every read and every button is an HTTP call to the API.\n"
         "- **api** — FastAPI. Runs the pipeline, risk model and self-healing loop (and `git` / `pytest`). "
         "Interactive docs at `/docs`.\n"
         "- **db** — PostgreSQL. Stores every workflow, event and artifact; not exposed outside the Docker network.\n"
+        "- **agent-adk / agent-crew** — the AI agents as A2A services (compose profile `agents`). The API calls them "
+        "over A2A; in direct mode the ADK service hands off to the CrewAI service itself.\n"
+        "- **Cloud:** all of it runs on AWS EC2 behind Caddy (HTTPS + login), deployed with `deploy/deploy.sh`.\n"
         "- Start-up order is enforced by health checks: db healthy → api healthy → ui. Data lives in named volumes."
     )
 
@@ -110,7 +123,8 @@ def render() -> None:
         "suite on Linux and Windows, the **risk-aware quality gate** (`scripts/ci_gate.py`), and the full 3-container stack with an end-to-end self-healing run.\n"
         "- **Quality gate:** tests always run. Failing tests → **BLOCK** (red check); passing tests but HIGH risk → "
         "**REVIEW** (warning annotation); otherwise **PASS**. The gate's report appears in the run summary.\n"
-        "- **Docker:** `docker compose up` starts all three containers; CI starts the same stack and runs an "
+        "- **Docker:** `docker compose up` starts ui + api + db (`--profile agents` adds the agent services); CI "
+        "starts the same stack and runs an "
         "end-to-end check through the API.\n"
         "- **Reports:** `scripts/export_report.py` exports any workflow as Markdown."
     )

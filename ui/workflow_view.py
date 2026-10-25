@@ -50,8 +50,7 @@ def _progress(tv: TraceView, run: PipelineRun) -> None:
         else:
             items.append((label, "todo"))
     progress_bar(items)
-    st.caption("✓ reached · ✗ tests failed · ⏸ waiting for you · plain = not reached in this run · "
-               "dashed = planned (Agentic AI phase)")
+    st.caption("✓ reached · ✗ tests failed · ⏸ waiting for you · plain = not reached in this run")
 
 
 # --------------------------------------------------------------------------- self-healing
@@ -369,5 +368,6 @@ def render_workflow(wf_id: str) -> None:
                 st.error(exc.detail)
 
     st.markdown("#### Roadmap")
-    st.caption("Still to come. The Agentic AI items plug into the same loop shown above.")
+    st.caption("Still to come. Built so far: the full loop above, AI agents (ADK + CrewAI) with a blackboard, "
+               "MCP tools and A2A services, and cloud deployment on AWS EC2.")
     upcoming_cards(UPCOMING)

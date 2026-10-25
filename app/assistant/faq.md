@@ -9,7 +9,7 @@ risky the change was with an ML model, runs the real test suite, packages the fa
 investigates the root cause and proposes a fix. Nothing changes until a human approves. After
 approval it repairs the code on a separate `ai/repair/*` branch, re-runs the real tests, reflects
 and retries if the fix was incomplete (at most 3 attempts), and opens a pull request that is never
-merged automatically. The project serves two courses: Agentic AI (agents, RAG, LLMs) and IDT /
+merged automatically. The project serves two courses: Agentic AI (LLM agents, MCP tools, A2A) and IDT /
 DevOps (CI/CD, containers, cloud deployment).
 
 ## What are the steps of the pipeline?
@@ -175,7 +175,7 @@ To delete everything permanently run `AWS_PROFILE=sem7 deploy/teardown.sh`.
 Python 3.11 (version used everywhere, conda env `SEM7`); Pydantic v2 for typed data contracts; pytest for real test runs; scikit-learn, pandas and
 NumPy for the risk model; FastAPI and Uvicorn for the backend API; Streamlit for the dashboard;
 SQLAlchemy with PostgreSQL 16 (SQLite when run without Docker) as the database; git for sandbox repos
-and repair branches; Docker and Docker Compose for the three containers; GitHub Actions for CI; AWS EC2
+and repair branches; Docker and Docker Compose for the containers (ui, api, PostgreSQL, plus the two agent services); GitHub Actions for CI; AWS EC2
 with Caddy for deployment; Google ADK and CrewAI on Gemini for the AI repair agents (separate
 `SEM7-agents` environment); and optionally the Anthropic Claude API for this assistant.
 
@@ -290,13 +290,12 @@ strategy does that step and the log says so. Model: `gemini-3.1-flash-lite` (set
 live tests the agents fixed scenario 1 and scenario 3 in one attempt each (rules need two for scenario 3).
 
 ## What is planned next?
-Agentic AI: MCP tool servers for the agents (risk model, CI tools), A2A communication between the ADK
-and CrewAI agents, more agentic patterns (hierarchical, parallel), prompt-injection and toxicity guardrails,
-per-agent monitoring with a heat map and tracing, a 40-run evaluation with boxplots, and RAG retrieval.
-DevOps: automatic deployment from GitHub Actions, a container registry with versioned images and
-rollback, security scanning (pip-audit, Trivy, gitleaks), coverage and lint gates, monitoring with
-Prometheus and Grafana or CloudWatch, database backups, a real GitHub PR adapter, and optionally
-Terraform for infrastructure as code.
+Already built for Agentic AI: the ADK + CrewAI agents, the blackboard (and direct hand-off), MCP tools,
+A2A agent services, and cloud deployment of everything on AWS EC2. Still to come for Agentic AI:
+hierarchical and parallel agent patterns with a comparison, prompt-injection and toxicity guardrails
+tested with personas, a per-agent heat map and tracing, and a 40-run evaluation with boxplots.
+After that, for DevOps: Terraform for infrastructure as code, automatic deployment (CD) from GitHub
+Actions, monitoring dashboards, and a real GitHub PR adapter.
 
 ## How does this assistant work?
 The assistant answers questions about the project and your workflow runs. It reads a curated knowledge

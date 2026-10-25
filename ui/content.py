@@ -22,8 +22,8 @@ STEPS = {
             "which functions were modified."
         ),
         "why": (
-            "Knowing precisely what changed is the input to the risk model now, and to the Investigation "
-            "Agent later (a failure in `test_add` right after `add()` changed is strong evidence)."
+            "Knowing precisely what changed is the input to the risk model and to the investigation step "
+            "(rules or the ADK Investigator): a failure in `test_add` right after `add()` changed is strong evidence."
         ),
     },
     "risk": {
@@ -57,8 +57,8 @@ STEPS = {
             "tests, error messages, logs and the diff."
         ),
         "why": (
-            "This structured evidence is what the Investigation Agent will receive. Agents work from facts "
-            "captured here, so they cannot invent logs or test results."
+            "This structured evidence is what the investigation step receives (rules or AI agents). Agents work "
+            "from facts captured here, so they cannot invent logs or test results."
         ),
     },
     "record": {
@@ -86,19 +86,27 @@ STEPS["heal"] = {
     "why": (
         "This closes the CI loop safely. The analysis runs in one of two modes, chosen per run: rule-based (no LLM: "
         "restore the smallest changed operator first, escalate to the whole function if tests still fail) or AI "
-        "agents (Google ADK investigator + root-cause agents, then a CrewAI planner + reviewer on Gemini). Both use "
-        "exactly the same interface, safety checks, approval gate and real test verification."
+        "agents (Google ADK investigator + root-cause agents, then a CrewAI planner + reviewer on Gemini). The agents "
+        "share a blackboard (or hand off directly), call MCP tools (risk model, code reader, test dry-run, past "
+        "failures) and run as separate A2A services. Both modes use exactly the same interface, safety checks, "
+        "approval gate and real test verification."
     ),
 }
 
 # Remaining roadmap: (title, track, description)
 UPCOMING = [
-    ("RAG knowledge retrieval", "Agentic AI",
-     "Search the project's code, tests, docs and history for context relevant to the failure."),
-    ("MCP tools & A2A between agents", "Agentic AI",
-     "Expose the risk model and CI tools to the agents via MCP; ADK and CrewAI agents talk over the A2A protocol."),
-    ("Agent guardrails, tracing & evaluation", "Agentic AI",
-     "Prompt-injection/toxicity checks, per-agent heat map and tracing, and a 40-run benchmark with boxplots."),
+    ("Hierarchical & parallel agent patterns", "Agentic AI",
+     "A manager agent delegating to specialists and parallel investigators, compared side by side with the "
+     "sequential pipeline."),
+    ("Input guardrails & personas", "Agentic AI",
+     "Prompt-injection and toxicity checks on everything the agents read, tested with prompts from different "
+     "personas."),
+    ("Agent heat map & tracing", "Agentic AI",
+     "Per-agent heat map of time, tokens and errors, and span-based tracing of every agent, tool and LLM call."),
+    ("40-run evaluation", "Agentic AI",
+     "About 40 runs across patterns, personas and prompt styles: success, time, tokens and cost, with boxplots."),
+    ("Terraform, CD & monitoring", "DevOps",
+     "Infrastructure as code, automatic deployment from GitHub Actions, and live monitoring dashboards."),
     ("GitHub PR adapter", "DevOps",
      "Open real pull requests on GitHub; sandboxes use the local adapter today."),
 ]
@@ -111,7 +119,6 @@ PROGRESS = [
     ("risk", "Risk", "built", "RISK_ANALYZED"),
     ("tests", "Tests", "built", "TESTING"),
     ("investigate", "Investigate", "rule", "INVESTIGATING"),
-    ("rag", "RAG", "planned", None),
     ("rootcause", "Root cause", "rule", "ROOT_CAUSE_IDENTIFIED"),
     ("plan", "Plan", "rule", "SOLUTION_PROPOSED"),
     ("approval", "Approval", "built", "APPROVED"),

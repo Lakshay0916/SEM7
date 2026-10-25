@@ -1,18 +1,18 @@
 # SEM7 — AI Self-Healing CI/CD + Agentic Debugging
 
 ML-assisted multi-agent system that predicts code-change risk, investigates CI
-failures with RAG and specialised agents, proposes a repair for human approval,
+failures with specialised AI agents (Google ADK + CrewAI), proposes a repair for human approval,
 applies it on a separate `ai/repair/*` branch, validates it with real tests,
 reflects on failed repairs, and opens a PR only after validation.
 
-> ML predicts, RAG retrieves, LLM reasons, agents act, and tests verify.
+> ML predicts, tools fetch facts, LLM reasons, agents act, and tests verify.
 
 One codebase serves two tracks:
 
 | Track | Focus | State |
 |---|---|---|
 | **IDT / DevOps** | Risk-aware quality gate, real CI tests, human-approved self-healing loop, Docker, GitHub Actions, reports | **implemented** |
-| **Agentic AI** | RAG retrieval and LLM agents for investigation, root cause and planning | next — plugs into the same `RepairStrategy` interface and loop |
+| **Agentic AI** | ADK + CrewAI agents for investigation, root cause and planning: blackboard, MCP tools, A2A services | **in progress** — agents, blackboard, MCP, A2A and cloud done; patterns, input guardrails, heat map/tracing and evaluation next |
 
 ![CI](https://github.com/Lakshay0916/SEM7/actions/workflows/ci.yml/badge.svg)
 
@@ -90,14 +90,13 @@ healthy `main` and a feature branch carrying the scenario's buggy commit.
 | 3 | ML risk module (mined from 9 public repos) | done — see `data/risk/EVALUATION.md` |
 | 4 | Workflow state machine + SQLite persistence + redacted logging | done |
 | UI | Streamlit dashboard (Dashboard, Run Pipeline, Workflows, Risk Model) | done (extended each phase) |
-| 5, 7 | Investigation, root cause, solution planning | done — **rule-based** `RepairStrategy` (LLM agents next) |
-| 6 | RAG retrieval | todo (Agentic AI) |
+| 5, 7 | Investigation, root cause, solution planning | done — **rule-based** `RepairStrategy` or LLM agents (below) |
 | 8–11 | Human approval, repair on `ai/repair/*`, real re-test, bounded reflection | done |
 | 12 | PR adapter | done — local adapter (GitHub adapter todo) |
 | IDT | Quality gate, 3-container Docker stack (ui + api + PostgreSQL), GitHub Actions (Linux + Windows + compose e2e), Markdown reports | done |
 | IDT | Deployment on AWS EC2 (AWS CLI + Docker Compose + Caddy HTTPS) | done — see `docs/DEPLOY.md` |
 | UI | Project assistant (chatbot): answers questions about the project and workflow runs | done — offline by default, Claude optional |
-| 5, 7 (LLM) | Multi-agent repair: Google ADK analysts + CrewAI planner/reviewer on Gemini | done (stages 1-2: agents + blackboard) — `REPAIR_STRATEGY=agents` |
+| 5, 7 (LLM) | Multi-agent repair: Google ADK analysts + CrewAI planner/reviewer on Gemini | done (stages 1-4: agents, blackboard, MCP tools, A2A services) — `REPAIR_STRATEGY=agents` |
 
 ## DevOps / IDT pipeline
 
@@ -198,8 +197,8 @@ FAILED → INVESTIGATING → ROOT_CAUSE_IDENTIFIED → SOLUTION_PROPOSED → WAI
 ```
 
 - `app/healing/strategy.py` — the `RepairStrategy` interface: `investigate()`, `root_cause()`, `plan()`.
-  These map one-to-one onto the planned Investigation, Root-Cause and Planner agents.
-- `app/healing/rules.py` — today's **rule-based** strategy (no LLM): restore a changed operator first;
+  These map one-to-one onto the Investigation, Root-Cause and Planner agents.
+- `app/healing/rules.py` — the **rule-based** strategy (no LLM): restore a changed operator first;
   if tests still fail, restore the implicated function from `main`.
 - `app/healing/loop.py` — strategy-agnostic loop: approval, repair branch, real re-test, reflection, PR.
 - `app/healing/patcher.py` — applies only approved plans; refuses tests/config/dependency edits and ambiguous snippets.

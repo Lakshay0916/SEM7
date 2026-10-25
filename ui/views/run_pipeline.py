@@ -17,7 +17,9 @@ STRATEGY_HELP = {
              "same result every time - this is what CI uses.",
     "agents": "Four LLM agents on Gemini: **Google ADK** Investigator → Root-cause analyst, then a **CrewAI** "
               "Planner → Reviewer crew. They see only the real evidence; their plan still goes through the safety "
-              "checks, your approval and the real tests. Each agent step (time, tokens) appears in the timeline.",
+              "checks, your approval and the real tests. They call MCP tools (risk model, code reader, test dry-run, "
+              "past failures) and, when deployed as services, talk over A2A. Each agent step, tool call and A2A "
+              "message (time, tokens) appears in the timeline.",
 }
 
 

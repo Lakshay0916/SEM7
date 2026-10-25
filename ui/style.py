@@ -218,6 +218,6 @@ def kv_tiles(items: dict[str, str]) -> None:
 def sidebar_brand() -> None:
     st.sidebar.markdown(
         '<div class="brand"><div class="logo">🛠️ SEM7 · Self-Healing CI/CD</div>'
-        "<small>ML predicts · RAG retrieves · LLM reasons · agents act · tests verify</small></div>",
+        "<small>ML predicts · tools fetch facts · LLM reasons · agents act · tests verify</small></div>",
         unsafe_allow_html=True,
     )
