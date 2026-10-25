@@ -1,6 +1,6 @@
 import streamlit as st
 
-from ui.content import STEPS, UPCOMING
+from ui.content import STEPS
 from ui.style import hero, is_dark
 
 _STYLE = """
@@ -134,10 +134,6 @@ def render() -> None:
         s = STEPS[key]
         with st.expander(f"{i} · {s['title']}"):
             st.markdown(f"**What happens:** {s['what']}\n\n**Why it matters:** {s['why']}")
-
-    st.markdown("#### What comes next")
-    for title, track, desc in UPCOMING:
-        st.markdown(f"- **{title}** _({track})_ — {desc}")
 
     st.markdown("#### Safety rules enforced in code")
     st.markdown(

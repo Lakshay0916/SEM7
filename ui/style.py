@@ -87,12 +87,6 @@ div[class*="st-key-step-plan"] { border-left-color: #8b95a7 !important; }
 .gauge-marker div { position: absolute; top: 2px; transform: translateX(-50%); font-size: .82rem; font-weight: 800; white-space: nowrap; }
 .gauge-labels { display: flex; justify-content: space-between; font-size: .74rem; opacity: .7; margin-top: .25rem; }
 
-/* Upcoming stages */
-.upcoming { display: grid; grid-template-columns: repeat(auto-fill, minmax(255px, 1fr)); gap: .75rem; }
-.upcoming div { border: 1px dashed rgba(128,145,170,0.45); border-radius: 12px; padding: .75rem .9rem; background: rgba(128,145,170,0.05); }
-.upcoming b { display: block; font-size: .93rem; }
-.upcoming small { opacity: .75; font-size: .82rem; line-height: 1.45; display: block; margin-top: .25rem; }
-.upcoming .ph { float: right; font-size: .7rem; font-weight: 700; opacity: .6; }
 
 /* Key/value tiles (wrap long values instead of truncating) */
 .kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .7rem; margin: .2rem 0 .6rem 0; }
@@ -184,14 +178,6 @@ def risk_gauge(score: float, medium: float, high: float) -> None:
         <span>HIGH ≥ {high:.2f} · 1</span></div></div>""",
         unsafe_allow_html=True,
     )
-
-
-def upcoming_cards(items: list[tuple[str, str, str]]) -> None:
-    cards = "".join(
-        f'<div><span class="ph">{esc(tag.upper())}</span><b>⏳ {esc(t)}</b><small>{esc(d)}</small></div>'
-        for t, tag, d in items
-    )
-    st.markdown(f'<div class="upcoming">{cards}</div>', unsafe_allow_html=True)
 
 
 def hero(title: str, body: str, chips: list[str] | None = None) -> None:

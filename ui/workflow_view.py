@@ -15,8 +15,8 @@ from app.models.schemas import PipelineRun, TestStatus
 from app.models.schemas import WorkflowState as S
 from ui.api_client import APIError, ApiClient, TraceView, get_api
 from ui.common import GATE_BADGE, RISK_BADGE, TEST_BADGE
-from ui.content import PROGRESS, STEPS, UPCOMING
-from ui.style import kv_tiles, progress_bar, risk_gauge, step_header, upcoming_cards
+from ui.content import PROGRESS, STEPS
+from ui.style import kv_tiles, progress_bar, risk_gauge, step_header
 
 
 def _act(fn, *args) -> None:
@@ -352,7 +352,7 @@ def render_workflow(wf_id: str) -> None:
                 st.markdown(f"**{a['kind']}** (attempt {a['attempt']}) · {a['created_at'][:19]}")
                 st.json(a["payload"], expanded=False)
 
-    # Safety + roadmap ---------------------------------------------------------------
+    # Safety check -------------------------------------------------------------------
     with st.container(border=True, key="safety-card"):
         st.markdown("#### 🛡️ Safety check — can the AI write to `main`?")
         st.write("This tries an **AI-actor** commit on `main` in this workflow's sandbox. The Git guard "
@@ -367,7 +367,3 @@ def render_workflow(wf_id: str) -> None:
             except APIError as exc:
                 st.error(exc.detail)
 
-    st.markdown("#### Roadmap")
-    st.caption("Still to come. Built so far: the full loop above, AI agents (ADK + CrewAI) with a blackboard, "
-               "MCP tools and A2A services, and cloud deployment on AWS EC2.")
-    upcoming_cards(UPCOMING)

@@ -93,24 +93,6 @@ STEPS["heal"] = {
     ),
 }
 
-# Remaining roadmap: (title, track, description)
-UPCOMING = [
-    ("Hierarchical & parallel agent patterns", "Agentic AI",
-     "A manager agent delegating to specialists and parallel investigators, compared side by side with the "
-     "sequential pipeline."),
-    ("Input guardrails & personas", "Agentic AI",
-     "Prompt-injection and toxicity checks on everything the agents read, tested with prompts from different "
-     "personas."),
-    ("Agent heat map & tracing", "Agentic AI",
-     "Per-agent heat map of time, tokens and errors, and span-based tracing of every agent, tool and LLM call."),
-    ("40-run evaluation", "Agentic AI",
-     "About 40 runs across patterns, personas and prompt styles: success, time, tokens and cost, with boxplots."),
-    ("Terraform, CD & monitoring", "DevOps",
-     "Infrastructure as code, automatic deployment from GitHub Actions, and live monitoring dashboards."),
-    ("GitHub PR adapter", "DevOps",
-     "Open real pull requests on GitHub; sandboxes use the local adapter today."),
-]
-
 # Progress strip: (key, label, status, workflow state that marks it reached)
 # status: built | rule (built: rules or AI agents, chosen per run) | planned
 PROGRESS = [
