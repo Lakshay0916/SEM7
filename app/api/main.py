@@ -28,6 +28,8 @@ from app.orchestration.pipeline import run_ci_workflow
 from app.orchestration.state import InvalidTransition
 from app.orchestration.store import Store
 from app.risk.predictor import MODEL_PATH, RiskPredictor
+from app.observability.monitoring import monitoring
+from app.observability.tracing import to_otlp
 from app.security.input_guard import check_text
 from app.security.personas import run_personas
 
@@ -185,6 +187,24 @@ def list_workflows(limit: int = 100) -> list[dict]:
 def get_workflow(wf_id: str) -> dict:
     """Full trace: workflow row, every event, every artifact."""
     return get_store().trace(wf_id)
+
+
+@app.get("/workflows/{wf_id}/trace", tags=["observability"])
+def get_trace(wf_id: str, attempt: int | None = None, format: Literal["spans", "otlp"] = "spans") -> dict:
+    """The traces of a workflow's agent attempts: spans (agent, LLM, tool, A2A, guardrail), or OTLP JSON."""
+    store = get_store()
+    store.get_workflow(wf_id)  # 404 for an unknown workflow
+    traces = [{"attempt": a["attempt"], **a["payload"]} for a in store.artifacts(wf_id, "trace")
+              if attempt is None or a["attempt"] == attempt]
+    if format == "otlp":
+        return to_otlp([s for t in traces for s in t["spans"]])
+    return {"workflow_id": wf_id, "traces": traces}
+
+
+@app.get("/monitoring/agents", tags=["observability"])
+def agent_monitoring(limit: int = 300) -> dict:
+    """Per-agent time, LLM calls, tokens, tool calls and errors from every saved trace (heat map data)."""
+    return monitoring(get_store(), limit=limit)
 
 
 @app.post("/workflows/{wf_id}/propose", tags=["self-healing"])

@@ -7,6 +7,10 @@ Wire format, JSON-RPC over HTTP (A2A protocol 1.0):
 
 Each service publishes an Agent Card at /.well-known/agent-card.json listing its skills, so a caller
 (the orchestrator, or another agent) can discover what it offers before sending work.
+
+Tracing crosses the boundary too: a service traces its skill run and returns the spans with the result
+("spans"), and `call_skill_traced` attaches them under the caller's A2A span, so one trace covers the
+orchestrator and both agent containers.
 """
 
 from __future__ import annotations
@@ -31,6 +35,8 @@ from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill, SendMessageRequest, TaskState
 
+from app.observability import tracing
+
 Skill = Callable[[dict], dict]  # payload -> {"result": ..., "records": [...]}
 
 
@@ -44,8 +50,8 @@ class A2ACallError(RuntimeError):
 class SkillExecutor(AgentExecutor):
     """Runs the requested skill (a blocking Python function) in a worker thread and returns its data."""
 
-    def __init__(self, skills: dict[str, Skill]) -> None:
-        self.skills = skills
+    def __init__(self, skills: dict[str, Skill], service: str = "agent") -> None:
+        self.skills, self.service = skills, service
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         updater = TaskUpdater(event_queue, context.task_id, context.context_id)
@@ -58,7 +64,8 @@ class SkillExecutor(AgentExecutor):
             skill = self.skills.get(request["skill"])
             if skill is None:
                 raise A2ACallError(f"unknown skill {request['skill']!r}; offered: {', '.join(self.skills)}")
-            output = await asyncio.to_thread(skill, dict(request.get("payload") or {}))
+            output = await asyncio.to_thread(run_traced, skill, dict(request.get("payload") or {}),
+                                             f"{self.service}/{request['skill']}")
             await updater.add_artifact([new_data_part(output)], name=f"{request['skill']}-result")
             await updater.complete()
         except Exception as exc:  # reported to the caller as a FAILED task, never swallowed
@@ -66,6 +73,14 @@ class SkillExecutor(AgentExecutor):
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         await TaskUpdater(event_queue, context.task_id, context.context_id).cancel()
+
+
+def run_traced(skill: Skill, payload: dict, label: str) -> dict:
+    """Run a skill under its own trace and return its spans with the output (merged by the caller)."""
+    trace = tracing.Trace()
+    with tracing.activate(trace), tracing.span(f"{label} (served)", "a2a", "a2a", side="server"):
+        output = skill(payload)
+    return {**output, "spans": trace.drain()}
 
 
 def agent_card(name: str, description: str, skills: list[tuple[str, str, str]], url: str) -> AgentCard:
@@ -84,7 +99,7 @@ def build_app(card: AgentCard, skills: dict[str, Skill]):
     from starlette.responses import JSONResponse
     from starlette.routing import Route
 
-    handler = DefaultRequestHandler(agent_executor=SkillExecutor(skills), task_store=InMemoryTaskStore(),
+    handler = DefaultRequestHandler(agent_executor=SkillExecutor(skills, card.name), task_store=InMemoryTaskStore(),
                                     agent_card=card)
 
     async def health(_):
@@ -128,6 +143,16 @@ async def call_skill_async(url: str, skill: str, payload: dict, timeout: float =
 def call_skill(url: str, skill: str, payload: dict, timeout: float = 600.0) -> dict:
     """Blocking A2A call (the strategy and the skills themselves are synchronous code)."""
     return asyncio.run(call_skill_async(url, skill, payload, timeout))
+
+
+def call_skill_traced(url: str, skill: str, payload: dict, label: str, timeout: float = 600.0) -> dict:
+    """`call_skill` inside an A2A span; the remote service's own spans are attached under it."""
+    with tracing.span(f"A2A → {label}", "a2a", "a2a", url=url, side="client") as s:
+        out = call_skill(url, skill, payload, timeout)
+        trace, _ = tracing.current()
+        if s is not None and trace is not None and out.get("spans"):
+            trace.adopt(out["spans"], s.span_id)
+    return out
 
 
 def fetch_card(url: str, timeout: float = 3.0) -> dict | None:

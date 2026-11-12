@@ -7,6 +7,7 @@ step 7 is the full audit trail.
 from __future__ import annotations
 
 import difflib
+import json
 
 import pandas as pd
 import streamlit as st
@@ -16,6 +17,7 @@ from app.models.schemas import WorkflowState as S
 from ui.api_client import APIError, ApiClient, TraceView, get_api
 from ui.common import GATE_BADGE, RISK_BADGE, TEST_BADGE
 from ui.content import PROGRESS, STEPS
+from ui.observability import span_table, waterfall
 from ui.style import kv_tiles, progress_bar, risk_gauge, step_header
 
 
@@ -109,6 +111,9 @@ def _attempt_block(tv: TraceView, n: int) -> None:
         board = [a["payload"] for a in tv.artifacts("blackboard") if a["attempt"] == n]
         if board:
             _blackboard(board)
+        trace = next((a["payload"] for a in tv.artifacts("trace") if a["attempt"] == n), None)
+        if trace and trace.get("spans"):
+            _trace(tv.get_workflow()["id"], n, trace["spans"])
 
         if approval:
             verdict = "✅ Approved" if approval["approved"] else "🚫 Rejected"
@@ -152,6 +157,30 @@ def _blackboard(board: list[dict]) -> None:
         with st.popover("Show raw posts (JSON)"):
             st.json([{k: e[k] for k in ("seq", "key", "author", "framework", "ts", "retracted", "content")}
                      for e in board], expanded=False)
+
+
+def _trace(wf_id: str, attempt: int, spans: list[dict]) -> None:
+    """The attempt's trace: every agent run, LLM call, tool call, A2A hop and guardrail check, in time."""
+    df = span_table(spans)
+    root = df.iloc[0]
+    llm = df[df["kind"] == "llm"]
+    with st.expander(f"🧵 Trace — {len(df)} spans · {root['seconds']:.1f} s · {len(llm)} LLM calls · "
+                     f"{int(llm['tokens'].fillna(0).sum()):,} tokens", expanded=False):
+        st.caption("Each bar is a span: when it started and how long it took, nested under the step that ran it. "
+                   "Recorded by ADK agent / model / tool callbacks and CrewAI's event bus; A2A hops include the "
+                   "agent service's own spans. ✚ marks a failed span. Hover a bar for tokens, model and details.")
+        st.altair_chart(waterfall(df), width="stretch")
+        c1, c2 = st.columns([3, 1])
+        with c1.popover("Table view"):
+            st.dataframe(df[["label", "kind", "framework", "start_s", "seconds", "tokens", "model", "status",
+                             "detail"]], hide_index=True, width="stretch")
+        try:
+            otlp = get_api().trace_otlp(wf_id, attempt)
+            c2.download_button("Download OTLP JSON", data=json.dumps(otlp, indent=1),
+                               file_name=f"{wf_id}-attempt{attempt}-trace.json", mime="application/json",
+                               key=f"otlp-{wf_id}-{attempt}")
+        except APIError:
+            pass
 
 
 def _healing(api: ApiClient, tv: TraceView, wf_id: str) -> None:

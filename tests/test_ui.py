@@ -41,7 +41,7 @@ def isolated_backend(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(
     "module", ["ui.views.dashboard", "ui.views.how_it_works", "ui.views.workflows", "ui.views.risk_model",
-               "ui.views.guardrails"]
+               "ui.views.guardrails", "ui.views.monitoring"]
 )
 def test_page_renders_without_errors(module):
     at = _page(module).run()
@@ -146,3 +146,33 @@ def test_chat_panel_refuses_an_injection():
     assert not at.exception, at.exception
     reply = at.session_state["assistant_history"][-1]
     assert "can't follow that request" in reply["content"]
+
+
+def _traced_workflows(n=2):
+    """Real workflows whose agent attempts were traced (fake agents that emit agent / LLM / tool spans)."""
+    import app.api.main as api
+    from app.agents.strategy import AgenticStrategy
+    from app.healing.loop import propose_fix
+    from app.orchestration.pipeline import run_ci_workflow
+    from tests.test_tracing import traced_sources
+
+    store = api.get_store()
+    for _ in range(n):
+        wf = run_ci_workflow("simple_bug", store, None, strategy=None).workflow_id
+        propose_fix(store, wf, AgenticStrategy(sources=traced_sources(), messaging="blackboard", fallback=False))
+    return wf
+
+
+def test_monitoring_page_shows_heat_maps_for_traced_runs():
+    _traced_workflows()
+    at = _page("ui.views.monitoring").run()
+    assert not at.exception, at.exception
+    assert any("Heat map" in m.value for m in at.markdown)
+    assert not any("No traced runs" in i.value for i in at.info)
+
+
+def test_workflow_view_shows_the_attempt_trace():
+    _traced_workflows(1)
+    at = _page("ui.views.workflows").run()
+    assert not at.exception, at.exception
+    assert any(e.label.startswith("🧵 Trace") for e in at.expander)

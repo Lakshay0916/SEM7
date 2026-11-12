@@ -63,6 +63,12 @@ class ApiClient:
 
     def safety_check(self, wf_id: str) -> dict: return self._req("POST", f"/workflows/{wf_id}/safety-check")
 
+    # observability
+    def trace_otlp(self, wf_id: str, attempt: int) -> dict:
+        return self._req("GET", f"/workflows/{wf_id}/trace?attempt={attempt}&format=otlp")
+
+    def agent_monitoring(self) -> dict: return self._req("GET", "/monitoring/agents")
+
     # guardrails
     def guardrail_check(self, text: str, context: str = "chat") -> dict:
         return self._req("POST", "/guardrails/check", {"text": text, "context": context})

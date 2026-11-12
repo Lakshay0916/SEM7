@@ -26,10 +26,10 @@ def _scope_json(scope: RepairScope | None) -> dict | None:
 
 
 def _call(url: str, service: str, skill: str, payload: dict, records: list[AgentRecord], caller: str) -> dict:
-    from app.a2a_agents.protocol import call_skill
+    from app.a2a_agents.protocol import call_skill_traced
 
     start = time.monotonic()
-    out = call_skill(url, skill, payload)
+    out = call_skill_traced(url, skill, payload, f"{service}/{skill}")
     records.append(AgentRecord(agent=f"{caller} → {service}/{skill}", framework="a2a",
                                seconds=round(time.monotonic() - start, 2), message=f"A2A message/send to {url}"))
     records.extend(AgentRecord.model_validate(r) for r in out.get("records", []))

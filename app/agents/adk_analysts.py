@@ -27,6 +27,7 @@ from app.agents.mcp_tools import adk_tool_callbacks, adk_toolsets, hint
 from app.agents.models import AgentRecord, SpecialistFinding
 from app.agents.retry import with_retries
 from app.models.schemas import InvestigationReport, RootCauseReport
+from app.observability import tracing
 
 APP = "sem7-adk"
 
@@ -112,13 +113,43 @@ SPECIALISTS = ["test_analyst", "change_analyst", "history_analyst"]
 PATTERNS = ("sequential", "parallel")  # the hierarchical pattern lives in the CrewAI planning half
 
 
+def trace_callbacks(model_name: str) -> dict:
+    """ADK agent and model callbacks that put every agent run and every LLM call on the trace."""
+
+    def key(kind, ctx):
+        return f"{kind}:{ctx.invocation_id}:{ctx.agent_name}"
+
+    def before_agent(callback_context):
+        tracing.begin(key("agent", callback_context), callback_context.agent_name, "agent", "adk", nest=True,
+                      model=model_name)
+
+    def after_agent(callback_context):
+        tracing.finish(key("agent", callback_context))
+
+    def before_model(callback_context, llm_request):
+        tracing.begin(key("llm", callback_context), f"LLM call · {callback_context.agent_name}", "llm", "adk",
+                      model=getattr(llm_request, "model", None) or model_name, agent=callback_context.agent_name)
+
+    def after_model(callback_context, llm_response):
+        usage = getattr(llm_response, "usage_metadata", None)
+        error = getattr(llm_response, "error_code", None)
+        tracing.finish(key("llm", callback_context), status="error" if error else "ok",
+                       prompt_tokens=getattr(usage, "prompt_token_count", None),
+                       output_tokens=getattr(usage, "candidates_token_count", None),
+                       error=str(error) if error else None)
+
+    return {"before_agent_callback": before_agent, "after_agent_callback": after_agent,
+            "before_model_callback": before_model, "after_model_callback": after_model}
+
+
 def build_agent(name: str, model, scope=None, records: list[AgentRecord] | None = None) -> LlmAgent:
-    """One ADK agent; with a repair `scope` it gets its MCP tools and tool-call monitoring callbacks."""
+    """One ADK agent; with a repair `scope` it gets its MCP tools. Callbacks record every tool call
+    (monitoring) and put the agent, its LLM calls and its tool calls on the active trace."""
     description, instruction, schema, key = SPECS[name]
     before, after = adk_tool_callbacks(name, records if records is not None else [])
     return LlmAgent(name=name, model=model, description=description, instruction=instruction + hint(name, scope),
                     output_schema=schema, output_key=key, tools=adk_toolsets(name, scope),
-                    before_tool_callback=before, after_tool_callback=after,
+                    before_tool_callback=before, after_tool_callback=after, **trace_callbacks(_name(model)),
                     generate_content_config=types.GenerateContentConfig(temperature=0))
 
 
@@ -145,7 +176,8 @@ def stages(pattern: str, root_cause: bool = True) -> list[list[str]]:
 async def _run(agent, state: dict, model_name: str, order: list[list[str]]) -> tuple[dict, list[AgentRecord]]:
     runner = InMemoryRunner(agent=agent, app_name=APP)
     try:
-        return await _drive(runner, state, model_name, order)
+        with tracing.span(f"ADK runner · {agent.name}", "crew", "adk"):
+            return await _drive(runner, state, model_name, order)
     finally:
         await runner.close()  # stops the MCP server subprocesses
 

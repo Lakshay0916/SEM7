@@ -40,13 +40,28 @@ class FakeGemini(BaseLlm):
                               prompt_token_count=100, candidates_token_count=20, total_token_count=120))
 
 
-class FakeCrewLLM(BaseLLM):
+class EventfulLLM(BaseLLM):
+    """A fake CrewAI LLM that, like crewai.LLM, emits the LLM-call events on CrewAI's event bus."""
+
+    def call(self, messages, tools=None, callbacks=None, available_functions=None, from_task=None,
+             from_agent=None, response_model=None):
+        from crewai.events.types.llm_events import LLMCallType
+        from crewai.llms.base_llm import llm_call_context
+
+        with llm_call_context():
+            self._emit_call_started_event(messages, from_task=from_task, from_agent=from_agent)
+            answer = self.answer(messages, from_agent)
+            self._emit_call_completed_event(answer, LLMCallType.LLM_CALL, from_task, from_agent, messages,
+                                            usage={"prompt_tokens": 70, "completion_tokens": 7})
+        return answer
+
+
+class FakeCrewLLM(EventfulLLM):
     """Planner answers with a draft (first a bad one, to exercise the guardrail retry); reviewer approves."""
 
     calls: list = []
 
-    def call(self, messages, tools=None, callbacks=None, available_functions=None, from_task=None,
-             from_agent=None, response_model=None):
+    def answer(self, messages, from_agent=None):
         text = json.dumps(messages) if not isinstance(messages, str) else messages
         self.calls.append(text)
         draft = {"summary": "Restore addition", "root_cause": "add() uses -",
@@ -263,13 +278,12 @@ def test_parallel_pattern_on_the_blackboard_posts_each_specialists_finding():
     assert bb.get("finding:change_analyst")["focus"] == "code change"
 
 
-class HierarchicalCrewLLM(BaseLLM):
+class HierarchicalCrewLLM(EventfulLLM):
     """Repair Lead delegates drafting then review, then answers; its first answer edits a test (guardrail)."""
 
     calls: list = []
 
-    def call(self, messages, tools=None, callbacks=None, available_functions=None, from_task=None,
-             from_agent=None, response_model=None):
+    def answer(self, messages, from_agent=None):
         text = json.dumps(messages) if not isinstance(messages, str) else messages
         role = getattr(from_agent, "role", "")
         self.calls.append((role, text))
@@ -312,3 +326,82 @@ def test_hierarchical_pattern_lead_delegates_and_its_plan_is_guarded(tmp_path, m
     delegations = [r.agent for r in records if " → " in r.agent]
     assert delegations[:2] == ["Repair Lead → Repair Planner", "Repair Lead → Code Reviewer"]
     assert records[-1].agent == "Repair Lead" and "2 delegation(s)" in records[-1].message
+
+
+# --------------------------------------------------------------------------- tracing from the real callbacks
+
+
+def _tree(spans):
+    by_id = {s["span_id"]: s for s in spans}
+    return [(s["kind"], s["name"], by_id[s["parent_id"]]["name"] if s["parent_id"] in by_id else None)
+            for s in spans]
+
+
+def test_adk_callbacks_trace_each_agent_and_each_llm_call_with_tokens():
+    from app.observability import tracing
+
+    trace, model = tracing.Trace(), FakeGemini()
+    with tracing.activate(trace):
+        run_analysts("EVIDENCE: test_add fails", model, [])
+    spans = trace.drain()
+    rows = _tree(spans)
+    assert ("crew", "ADK runner · adk_analysts", None) in rows
+    assert ("agent", "investigator", "ADK runner · adk_analysts") in rows        # before/after_agent_callback
+    assert ("llm", "LLM call · investigator", "investigator") in rows            # before/after_model_callback
+    assert ("llm", "LLM call · root_cause_analyst", "root_cause_analyst") in rows
+    llm = next(s for s in spans if s["name"] == "LLM call · investigator")
+    assert llm["attributes"]["prompt_tokens"] == 100 and llm["attributes"]["output_tokens"] == 20
+
+
+def test_parallel_specialists_show_up_as_overlapping_spans():
+    from app.observability import tracing
+
+    trace, model = tracing.Trace(), ParallelGemini()
+    with tracing.activate(trace):
+        run_analysts("EVIDENCE", model, [], pattern="parallel")
+    agents = {s["name"]: s for s in trace.drain() if s["kind"] == "agent"}
+    specialists = [agents[n] for n in ("test_analyst", "change_analyst", "history_analyst")]
+    assert max(s["start"] for s in specialists) < min(s["end"] for s in specialists)  # all three ran at once
+    assert agents["investigation_lead"]["start"] >= min(s["end"] for s in specialists)  # fan-in after
+
+
+def test_crewai_events_become_agent_and_llm_spans(tmp_path):
+    from app.observability import tracing
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src" / "calculator.py").write_text('def add(a, b):\n    """Return the sum of a and b."""\n'
+                                                    "    return a - b\n")
+    (tmp_path / "tests" / "test_calculator.py").write_text("def test_add():\n    assert True\n")
+    llm = FakeCrewLLM(model="fake-crew")
+    llm.calls.clear()
+    trace = tracing.Trace()
+    with tracing.activate(trace):
+        run_planner("EVIDENCE", InvestigationReport(**INVESTIGATION), RootCauseReport(**ROOT_CAUSE), tmp_path, llm, [])
+    rows = _tree(trace.drain())
+    assert ("agent", "Repair Planner", "CrewAI sequential crew") in rows
+    assert ("agent", "Code Reviewer", "CrewAI sequential crew") in rows
+    assert ("llm", "LLM call · Repair Planner", "Repair Planner") in rows
+    assert sum(r[0] == "llm" and r[2] == "Repair Planner" for r in rows) == 2      # the guardrail retry too
+
+
+def test_hierarchical_trace_puts_the_coworkers_work_inside_the_delegation(tmp_path, monkeypatch):
+    from app.observability import tracing
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src" / "calculator.py").write_text('def add(a, b):\n    """Return the sum of a and b."""\n'
+                                                    "    return a - b\n")
+    (tmp_path / "tests" / "test_calculator.py").write_text("def test_add():\n    assert True\n")
+    llm = HierarchicalCrewLLM(model="fake-crew")
+    llm.calls.clear()
+    monkeypatch.setattr("app.agents.crew_planner._llm", lambda _: (llm, "fake-crew"))
+    trace = tracing.Trace()
+    with tracing.activate(trace):
+        run_planner("EVIDENCE", InvestigationReport(**INVESTIGATION), RootCauseReport(**ROOT_CAUSE), tmp_path,
+                    "gemini", [], pattern="hierarchical")
+    rows = _tree(trace.drain())
+    assert ("delegation", "delegate → Repair Planner", "Repair Lead") in rows
+    assert ("agent", "Repair Planner", "delegate → Repair Planner") in rows       # the coworker ran inside
+    assert ("llm", "LLM call · Repair Planner", "Repair Planner") in rows
+    assert ("delegation", "delegate → Code Reviewer", "Repair Lead") in rows

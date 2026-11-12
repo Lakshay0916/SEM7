@@ -24,6 +24,7 @@ from typing import Any, Callable
 from pydantic import BaseModel, Field
 
 from app.agents.models import AgentRecord
+from app.observability import tracing
 
 
 class BlackboardEntry(BaseModel):
@@ -117,7 +118,9 @@ class BlackboardController:
                 raise BlackboardStuck(f"no agent can contribute towards {goal!r} (missing: {', '.join(missing)})")
             ks = ready[0]
             start, seen = time.monotonic(), len(records)
-            content, summary = ks.run(bb, records)
+            with tracing.span(f"blackboard step · {ks.name}", "step", ks.framework, reads=", ".join(ks.needs),
+                              posts=ks.produces):
+                content, summary = ks.run(bb, records)
             for r in records[seen:]:  # A2A messages and MCP tool calls made while the agent worked, in order
                 if r.framework in ("mcp", "a2a"):
                     prefix = "tool" if r.framework == "mcp" else "a2a"
@@ -125,7 +128,10 @@ class BlackboardController:
                             summary=f"{r.status} in {r.seconds:.2f}s - {r.message}")
             bb.post(ks.produces, content, author=ks.name, framework=ks.framework, summary=summary)
             for guard in (g for g in self.guards if g.key == ks.produces):
-                problems = guard.check(bb.get(ks.produces))
+                with tracing.span(f"guard · {guard.name}", "guardrail", "system", checks=ks.produces) as gs:
+                    problems = guard.check(bb.get(ks.produces))
+                    if gs is not None:
+                        gs.attributes["verdict"] = "rejected: " + "; ".join(problems)[:200] if problems else "passed"
                 if not problems:
                     continue
                 tries = bb.count(f"feedback:{ks.produces}") + 1

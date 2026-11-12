@@ -33,6 +33,7 @@ from app.agents.mcp_tools import crew_mcps, crew_tool_events, hint  # noqa: E402
 from app.agents.models import AgentRecord, PlanDraft, PlanReview  # noqa: E402
 from app.agents.retry import with_retries  # noqa: E402
 from app.models.schemas import InvestigationReport, RootCauseReport  # noqa: E402
+from app.observability import tracing  # noqa: E402
 
 PLAN_TASK = """Write the smallest code change that makes the failing tests pass.
 
@@ -186,7 +187,8 @@ def run_hierarchical(evidence: str, investigation_summary: str, root_cause_json:
     def kickoff():
         crew = build_hierarchical_crew(llm, repo_dir, scope, records, feedback)
         try:
-            with crew_tool_events(records, LEAD[0]):
+            with tracing.span("CrewAI hierarchical crew", "crew", "crewai", model=model_name), \
+                    crew_tool_events(records, LEAD[0]):
                 return crew.kickoff(inputs=inputs)
         finally:
             for agent in crew.agents:  # the coworkers' MCP server processes were started up front
@@ -221,7 +223,7 @@ def run_planner(evidence: str, investigation: InvestigationReport, root_cause: R
     inputs = {"evidence": evidence, "root_cause": root_cause.model_dump_json(),
               "investigation": investigation.failure_summary}
     def kickoff():
-        with crew_tool_events(records):
+        with tracing.span("CrewAI sequential crew", "crew", "crewai", model=model_name), crew_tool_events(records):
             return build_crew(llm, repo_dir, on_task, scope, records).kickoff(inputs=inputs)
 
     result = with_retries(kickoff,
@@ -244,7 +246,7 @@ def _run_single(role: str, name: str, description: str, expected: str, output_mo
                 output_pydantic=output_model)
     start = time.monotonic()
     def kickoff():
-        with crew_tool_events(records, role):
+        with tracing.span(f"CrewAI crew · {role}", "crew", "crewai", model=model_name), crew_tool_events(records, role):
             return Crew(agents=[agent], tasks=[task], process=Process.sequential, verbose=False).kickoff(inputs=inputs)
 
     result = with_retries(kickoff, agent=role, framework="crewai", records=records)

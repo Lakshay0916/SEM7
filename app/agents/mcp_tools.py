@@ -18,6 +18,7 @@ from contextlib import contextmanager
 
 from app.agents.models import AgentRecord
 from app.config import PROJECT_ROOT
+from app.observability import tracing
 from app.mcp_servers.tools import RepairScope
 
 SERVERS = {"sem7-risk": "app.mcp_servers.risk_server", "sem7-ci": "app.mcp_servers.ci_server"}
@@ -115,13 +116,21 @@ def adk_tool_callbacks(agent: str, records: list[AgentRecord]):
     """before/after tool callbacks that time each MCP call and record it."""
     started: dict[str, float] = {}
 
+    def span_key(tool, tool_context):
+        return f"tool:{getattr(tool_context, 'function_call_id', '')}:{agent}:{tool.name}"
+
     def before(tool, args, tool_context):
         started[tool.name] = time.monotonic()
+        if tool.name not in INTERNAL_TOOLS:
+            tracing.begin(span_key(tool, tool_context), f"tool · {tool.name}", "tool", "mcp", agent=agent,
+                          args=_summarise(args, 120))
         return None
 
     def after(tool, args, tool_context, tool_response):
         if tool.name in INTERNAL_TOOLS:
             return None
+        tracing.finish(span_key(tool, tool_context), status="error" if _is_error(tool_response) else "ok",
+                       result=_summarise(tool_response, 160))
         records.append(AgentRecord(
             agent=f"{agent} → {tool.name}", framework="mcp", status="error" if _is_error(tool_response) else "ok",
             seconds=round(time.monotonic() - started.pop(tool.name, time.monotonic()), 2),
@@ -146,20 +155,33 @@ def crew_mcps(agent: str, scope: RepairScope | None) -> list:
 
 @contextmanager
 def crew_tool_events(records: list[AgentRecord], role: str = "crew"):
-    """Record every MCP tool call CrewAI agents make, and every delegation a manager agent makes
-    (both from CrewAI's event bus), while the block runs."""
+    """CrewAI's event bus while the block runs: record every MCP tool call and every delegation a manager
+    makes (monitoring), and - when a trace is active - turn agent runs, LLM calls, delegations and tool
+    calls into spans.
+
+    CrewAI runs handlers on a thread pool, so events can be handled out of order; the raw events are kept
+    and the span tree is built from their timestamps once the crew is done."""
     from crewai.events.event_bus import crewai_event_bus
+    from crewai.events.types.agent_events import (AgentExecutionCompletedEvent, AgentExecutionErrorEvent,
+                                                  AgentExecutionStartedEvent)
+    from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallFailedEvent, LLMCallStartedEvent
     from crewai.events.types.mcp_events import MCPToolExecutionCompletedEvent, MCPToolExecutionFailedEvent
     from crewai.events.types.tool_usage_events import ToolUsageFinishedEvent, ToolUsageStartedEvent
 
     from app.agents.crew_planner import DELEGATION_TOOLS
 
+    trace, parent = tracing.current()
+    seen: list = []  # raw events, for the trace
     working: list[str] = []  # coworkers doing delegated work right now (CrewAI reports the manager as the caller)
 
     def is_delegation(event) -> bool:
-        return (event.tool_name or "").lower().replace(" ", "_") in DELEGATION_TOOLS
+        return (getattr(event, "tool_name", "") or "").lower().replace(" ", "_") in DELEGATION_TOOLS
+
+    def keep(source, event):
+        seen.append(event)
 
     def done(source, event):
+        seen.append(event)
         failed = isinstance(event, MCPToolExecutionFailedEvent)
         result = event.error if failed else event.result
         caller = working[-1] if working else event.agent_role or getattr(event.from_agent, "role", None) or role
@@ -171,12 +193,13 @@ def crew_tool_events(records: list[AgentRecord], role: str = "crew"):
 
     def delegation_started(source, event):
         if is_delegation(event):
-            args = event.tool_args if isinstance(event.tool_args, dict) else {}
-            working.append(args.get("coworker", "coworker"))
+            seen.append(event)
+            working.append(_args(event.tool_args).get("coworker", "coworker"))
 
     def delegated(source, event):
         if not is_delegation(event):
             return
+        seen.append(event)
         if working:
             working.pop()
         args = event.tool_args if isinstance(event.tool_args, dict) else {}
@@ -190,6 +213,10 @@ def crew_tool_events(records: list[AgentRecord], role: str = "crew"):
 
     handlers = [(MCPToolExecutionCompletedEvent, done), (MCPToolExecutionFailedEvent, done),
                 (ToolUsageStartedEvent, delegation_started), (ToolUsageFinishedEvent, delegated)]
+    if trace is not None:
+        handlers += [(t, keep) for t in (AgentExecutionStartedEvent, AgentExecutionCompletedEvent,
+                                         AgentExecutionErrorEvent, LLMCallStartedEvent, LLMCallCompletedEvent,
+                                         LLMCallFailedEvent)]
     for event_type, handler in handlers:
         crewai_event_bus.register_handler(event_type, handler)
     try:
@@ -198,3 +225,91 @@ def crew_tool_events(records: list[AgentRecord], role: str = "crew"):
         crewai_event_bus.flush(timeout=10)
         for event_type, handler in handlers:
             crewai_event_bus.off(event_type, handler)
+        if trace is not None:
+            crew_spans(trace, parent, list(seen), is_delegation)
+
+
+def _args(raw) -> dict:
+    """Tool arguments as a dict (CrewAI reports them as a JSON string when a tool call starts)."""
+    if isinstance(raw, dict):
+        return raw
+    try:
+        value = json.loads(raw) if isinstance(raw, str) else {}
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _ts(event) -> float:
+    t = getattr(event, "timestamp", None)
+    return t.timestamp() if t is not None else time.time()
+
+
+def _role(event) -> str:
+    return (getattr(event, "agent_role", None) or getattr(getattr(event, "agent", None), "role", None)
+            or getattr(getattr(event, "from_agent", None), "role", None) or "agent")
+
+
+def crew_spans(trace, parent: str | None, events: list, is_delegation) -> None:
+    """Rebuild a crew run as spans: agent runs, delegations (with the coworker's run inside), LLM calls
+    and MCP tool calls, each placed under the innermost agent or delegation open at that moment."""
+    stack: list = []   # open agent / delegation spans
+    calls: dict = {}   # LLM call_id -> span
+
+    def under(role_name: str | None = None) -> str | None:
+        for s in reversed(stack):
+            if role_name is None or s.attributes.get("role") == role_name:
+                return s.span_id
+        return stack[-1].span_id if stack else parent
+
+    def close(match, ts, status="ok"):
+        for i in range(len(stack) - 1, -1, -1):
+            if match(stack[i]):
+                for s in stack[i:]:
+                    if s.end is None:
+                        s.end = ts
+                stack[i].status = status
+                del stack[i:]
+                return
+
+    for ev in sorted(events, key=lambda e: (_ts(e), getattr(e, "emission_sequence", 0) or 0)):
+        name, ts = type(ev).__name__, _ts(ev)
+        if name == "AgentExecutionStartedEvent":
+            stack.append(trace.open(_role(ev), "agent", under(), "crewai", start=ts, role=_role(ev)))
+        elif name in ("AgentExecutionCompletedEvent", "AgentExecutionErrorEvent"):
+            role_name = _role(ev)
+            close(lambda s: s.kind == "agent" and s.attributes.get("role") == role_name, ts,
+                  "error" if name.endswith("ErrorEvent") else "ok")
+        elif name == "ToolUsageStartedEvent" and is_delegation(ev):
+            args = _args(ev.tool_args)
+            stack.append(trace.open(f"delegate → {args.get('coworker', 'coworker')}", "delegation", under(),
+                                    "crewai", start=ts, task=_summarise(args.get("task") or "", 140)))
+        elif name == "ToolUsageFinishedEvent" and is_delegation(ev):
+            coworker = _args(ev.tool_args).get("coworker")
+            open_delegation = next((s for s in reversed(stack) if s.kind == "delegation"), None)
+            if open_delegation is not None and coworker:  # the start event may not have had the parsed args yet
+                open_delegation.name = f"delegate → {coworker}"
+            close(lambda s: s.kind == "delegation", ts)
+        elif name == "LLMCallStartedEvent":
+            calls[ev.call_id] = trace.open(f"LLM call · {_role(ev)}", "llm", under(_role(ev)), "crewai",
+                                           start=ts, model=getattr(ev, "model", None), agent=_role(ev))
+        elif name in ("LLMCallCompletedEvent", "LLMCallFailedEvent"):
+            s = calls.pop(getattr(ev, "call_id", None), None)
+            if s is not None:
+                usage = getattr(ev, "usage", None) or {}
+                get = usage.get if isinstance(usage, dict) else (lambda k, d=None: getattr(usage, k, d))
+                s.end, s.status = ts, "error" if name == "LLMCallFailedEvent" else "ok"
+                if name == "LLMCallFailedEvent":
+                    s.attributes["error"] = str(getattr(ev, "error", "") or "")[:200]
+                s.attributes.update({k: v for k, v in {"prompt_tokens": get("prompt_tokens"),
+                                                       "output_tokens": get("completion_tokens")}.items() if v})
+        elif name in ("MCPToolExecutionCompletedEvent", "MCPToolExecutionFailedEvent"):
+            took = (getattr(ev, "execution_duration_ms", None) or 0) / 1000
+            failed = name.endswith("FailedEvent")
+            trace.add(f"tool · {ev.tool_name}", "tool", ts - took, ts, under(), "mcp",
+                      "error" if failed or _is_error(getattr(ev, "result", None)) else "ok",
+                      args=_summarise(ev.tool_args or {}, 120))
+    last = max((_ts(e) for e in events), default=time.time())
+    for s in stack + list(calls.values()):
+        if s.end is None:
+            s.end, s.status = last, "open"

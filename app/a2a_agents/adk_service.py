@@ -17,7 +17,7 @@ import os
 import time
 from pathlib import Path
 
-from app.a2a_agents.protocol import agent_card, build_app, call_skill, public_url
+from app.a2a_agents.protocol import agent_card, build_app, call_skill_traced, public_url
 from app.agents.models import AgentRecord
 from app.config import settings
 from app.mcp_servers.tools import RepairScope
@@ -75,8 +75,9 @@ def analyse_and_plan(payload: dict) -> dict:
                            _scope(payload), "parallel" if pattern == "parallel" else "sequential")
     # Hand-off to the CrewAI agents: an A2A call from this (ADK) agent service to the CrewAI service.
     start = time.monotonic()
-    crew = call_skill(payload.get("crew_url") or CREW_URL, "plan_and_review",
-                      {**payload, "investigation": inv.model_dump(mode="json"), "root_cause": rc.model_dump(mode="json")})
+    crew = call_skill_traced(payload.get("crew_url") or CREW_URL, "plan_and_review",
+                             {**payload, "investigation": inv.model_dump(mode="json"),
+                              "root_cause": rc.model_dump(mode="json")}, "sem7-crewai/plan_and_review")
     records.append(AgentRecord(agent="root_cause_analyst → sem7-crewai/plan_and_review", framework="a2a",
                                seconds=round(time.monotonic() - start, 2),
                                message="ADK agent handed the root cause to the CrewAI crew over A2A"))

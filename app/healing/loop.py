@@ -72,10 +72,13 @@ def build_context(store: Store, wf_id: str) -> RepairContext:
 
 
 def _log_agent_steps(store: Store, wf_id: str, strategy: RepairStrategy) -> None:
-    """Agent strategies report each LLM step (time, tokens, retries, fallbacks) and their blackboard posts;
-    record the steps as events and persist the blackboard with the workflow."""
+    """Agent strategies report each LLM step (time, tokens, retries, fallbacks), their blackboard posts and
+    each finished attempt's trace; record the steps as events and persist the board and the traces."""
     for entry in getattr(strategy, "pop_blackboard", lambda: [])():
         store.save_artifact(wf_id, "blackboard", entry, attempt=entry.attempt)
+    for attempt, spans in getattr(strategy, "pop_traces", lambda: [])():
+        store.save_artifact(wf_id, "trace", {"trace_id": spans[0]["trace_id"] if spans else "", "spans": spans},
+                            attempt=attempt)
     for rec in getattr(strategy, "pop_records", lambda: [])():
         tokens = f" [{rec.prompt_tokens}+{rec.output_tokens} tokens]" if rec.prompt_tokens or rec.output_tokens else ""
         store.log_event(wf_id, f"{rec.framework}:{rec.agent}", rec.status,

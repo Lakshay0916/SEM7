@@ -316,12 +316,25 @@ prompt injector, data thief, saboteur, abusive user, hostile committer) with 33 
 Guardrails page: 20 of 21 attacks caught and none of the 12 friendly prompts blocked. The miss is a
 paraphrased injection that pattern rules cannot detect.
 
+## How are the agents monitored and traced? Callbacks, heat map, observability
+Every AI-agent attempt is recorded as one trace of timed spans in the OpenTelemetry model (trace, span
+and parent ids, kind, attributes). ADK callbacks (before/after agent, before/after model, before/after
+tool) and CrewAI's event bus (agent runs, LLM calls, tool calls, MCP calls, delegations) create the
+spans, so every LLM call has its model, time and prompt/output tokens, and every MCP tool call and A2A
+hop is on the same tree; the agent services send their spans back over A2A. Each attempt's trace is
+saved with the workflow and shown as a waterfall (open an attempt and expand Trace), with a download
+in OTLP JSON for tools like Jaeger. The Agent Monitoring page turns all traces into heat maps: each
+agent's average time, tokens, LLM calls, tool calls and errors, and each agent in each attempt. Together
+with the audit trail (every state change and decision) and the blackboard (who posted what and when)
+this covers observability: tracing, audit and provenance. API: GET /workflows/{id}/trace and
+GET /monitoring/agents.
+
 ## What is planned next?
 Already built for Agentic AI: the ADK + CrewAI agents, the blackboard (and direct hand-off), MCP tools,
 A2A agent services, sequential / parallel / hierarchical agent patterns, prompt-injection and
-toxicity guardrails tested with personas, and cloud deployment of everything on AWS EC2. Still to
-come for Agentic AI: a per-agent heat map and tracing, and a 40-run evaluation with boxplots that
-also compares the patterns.
+toxicity guardrails tested with personas, tracing with per-agent heat maps, and cloud deployment of
+everything on AWS EC2. Still to come for Agentic AI: a 40-run evaluation with boxplots that compares
+the patterns and messaging modes on time, tokens, cost and success.
 After that, for DevOps: Terraform for infrastructure as code, automatic deployment (CD) from GitHub
 Actions, monitoring dashboards, and a real GitHub PR adapter.
 

@@ -221,3 +221,16 @@ def test_direct_over_a2a_carries_the_pattern_to_the_agent_services(store, servic
     propose_fix(store, wf, AgenticStrategy(messaging="direct", transport="a2a", fallback=False, pattern="parallel"))
     kind, payload = services["seen"]["adk"][-1]
     assert kind == "analyse_and_plan" and payload["pattern"] == "parallel"
+
+
+def test_one_trace_spans_the_orchestrator_and_the_agent_services(store, services, monkeypatch):
+    monkeypatch.setattr(remote, "settings", replace(remote.settings, adk_agent_url=services["adk"],
+                                                    crew_agent_url=services["crew"]))
+    wf = run_ci_workflow("simple_bug", store, None, strategy=None).workflow_id
+    propose_fix(store, wf, AgenticStrategy(messaging="blackboard", transport="a2a", fallback=False))
+    spans = store.artifacts(wf, "trace")[-1]["payload"]["spans"]
+    by_id = {s["span_id"]: s for s in spans}
+    served = [s for s in spans if s["name"].endswith("(served)")]
+    assert {s["name"] for s in served} >= {"fake-adk/investigator (served)", "fake-crew/review (served)"}
+    for s in served:  # each service's spans hang under the orchestrator's A2A hop, in the same trace
+        assert by_id[s["parent_id"]]["name"].startswith("A2A → ") and s["trace_id"] == spans[0]["trace_id"]

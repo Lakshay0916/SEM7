@@ -164,6 +164,16 @@ default stays `rules` (CI, Docker and the EC2 stack need no API key).
     friendly and hostile, 33 prompts with expected outcomes. Current result: 20 / 21 attacks caught, 0 / 12
     friendly prompts blocked; the miss is a deliberately paraphrased injection that pattern rules cannot see.
     `POST /guardrails/check` checks any text.
+- **Tracing and monitoring (`app/observability/`):** every AI-agent attempt is one trace of timed spans
+  (OpenTelemetry's model: trace / span / parent ids, kind, attributes): attempt → input guardrail → phases →
+  blackboard steps → A2A hops → agent runs → **each LLM call** (model, prompt / output tokens) → MCP tool
+  calls, plus delegations and guard verdicts. Recorded by ADK `before/after_agent_callback`,
+  `before/after_model_callback` and tool callbacks, and by CrewAI's event bus (agent, LLM-call, tool and MCP
+  events, rebuilt into a tree by timestamp). Agent services trace their own skill runs and return the spans
+  over A2A, so one trace covers all three containers. Each attempt's trace is saved with the workflow:
+  **🧵 Trace** waterfall per attempt (and *Download OTLP JSON* for Jaeger / Tempo / Honeycomb),
+  `GET /workflows/{id}/trace[?format=otlp]`; the **📡 Agent Monitoring** page shows heat maps of every agent
+  (time, tokens, LLM calls, tool calls, errors) and of every agent in every attempt (`GET /monitoring/agents`).
 - **MCP tools (`AGENT_TOOLS=1`):** two MCP servers (`app/mcp_servers/`), launched over stdio and scoped to the one
   repair, so tools never see other paths or databases:
 

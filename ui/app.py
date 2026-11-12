@@ -9,7 +9,7 @@ import streamlit as st  # noqa: E402
 
 from ui.style import inject_css, sidebar_brand  # noqa: E402
 from ui.chat_widget import render_chat_widget  # noqa: E402
-from ui.views import dashboard, guardrails, how_it_works, risk_model, run_pipeline, workflows  # noqa: E402
+from ui.views import dashboard, guardrails, how_it_works, monitoring, risk_model, run_pipeline, workflows  # noqa: E402
 
 st.set_page_config(page_title="SEM7 Self-Healing CI/CD", page_icon="🛠️", layout="wide")
 inject_css()
@@ -21,6 +21,7 @@ pages = {
     "workflows": st.Page(workflows.render, title="Workflow History", icon="🧭", url_path="workflows"),
     "risk": st.Page(risk_model.render, title="Risk Model", icon="📈", url_path="risk"),
     "guardrails": st.Page(guardrails.render, title="Guardrails", icon="🛡️", url_path="guardrails"),
+    "monitoring": st.Page(monitoring.render, title="Agent Monitoring", icon="📡", url_path="monitoring"),
 }
 st.session_state["_pages"] = pages  # lets pages link to each other
 
@@ -28,7 +29,7 @@ nav = st.navigation({
     "Overview": [pages["dashboard"], pages["how-it-works"]],
     "Pipeline": [pages["run"], pages["workflows"]],
     "Models": [pages["risk"]],
-    "Safety": [pages["guardrails"]],
+    "Agents": [pages["monitoring"], pages["guardrails"]],
 })
 sidebar_brand()
 st.sidebar.caption("🌓 Light / dark: **⋮ menu → Settings → Theme** (follows your system by default).")

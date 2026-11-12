@@ -23,6 +23,7 @@ says so - the run is never silently faked.
 from __future__ import annotations
 
 import json
+import time
 from typing import Callable
 
 from app.agents.blackboard import Blackboard, BlackboardController, BlackboardEntry, Guard, KnowledgeSource
@@ -34,6 +35,7 @@ from app.config import settings
 from app.healing.rules import RuleBasedStrategy
 from app.healing.strategy import RepairContext
 from app.models.schemas import InvestigationReport, RepairPlan, RootCauseReport
+from app.observability import tracing
 from app.security.input_guard import InputBlocked, Verdict, check_text, spotlight
 
 Analysts = Callable[[str, list[AgentRecord]], tuple[InvestigationReport, RootCauseReport]]
@@ -167,6 +169,27 @@ def plan_guards(repo_dir) -> list[Guard]:
 # --------------------------------------------------------------------------- strategy
 
 
+class _Phase:
+    """Context manager: activate the attempt's trace and wrap the block in a phase span."""
+
+    def __init__(self, trace, root, name):
+        self.trace, self.root, self.name = trace, root, name
+
+    def __enter__(self):
+        self._activation = tracing.activate(self.trace, self.root.span_id)
+        self._activation.__enter__()
+        self._span = tracing.span(self.name, "phase", "system")
+        self._span.__enter__()
+        return self
+
+    def __exit__(self, *exc):
+        try:
+            self._span.__exit__(*exc)
+        finally:
+            self._activation.__exit__(*exc)
+        return False
+
+
 class AgenticStrategy:
     name = "adk+crewai"
     kind = "llm-agent"
@@ -196,12 +219,32 @@ class AgenticStrategy:
         self.records: list[AgentRecord] = []
         self.boards: dict[int, Blackboard] = {}
         self.blocked: dict[int, Verdict] = {}  # attempts whose evidence the input guardrail kept from the agents
+        self.traces: dict[int, tuple[tracing.Trace, tracing.Span]] = {}  # attempt -> (trace, its root span)
+        self.finished: list[tuple[int, list[dict]]] = []                # traces ready to be saved
         self._cache: dict[int, tuple[str, RootCauseReport | None]] = {}  # attempt -> (evidence, root cause)
 
     def pop_records(self) -> list[AgentRecord]:
         """Monitoring records since the last call (the loop writes them to the event log)."""
         out, self.records = self.records, []
         return out
+
+    def pop_traces(self) -> list[tuple[int, list[dict]]]:
+        """Finished attempts' traces (attempt, spans) since the last call; the loop saves them."""
+        out, self.finished = self.finished, []
+        return out
+
+    def _trace(self, ctx: RepairContext) -> tuple[tracing.Trace, tracing.Span]:
+        if ctx.attempt not in self.traces:
+            trace = tracing.Trace()
+            root = trace.open(f"repair attempt {ctx.attempt}", "attempt", None, "system", strategy=self.name,
+                              pattern=self.pattern, messaging=self.messaging, transport=self.transport)
+            self.traces[ctx.attempt] = (trace, root)
+        return self.traces[ctx.attempt]
+
+    def _phase(self, ctx: RepairContext, name: str):
+        """Run one interface method as a phase span of this attempt's trace."""
+        trace, root = self._trace(ctx)
+        return _Phase(trace, root, name)
 
     def pop_blackboard(self) -> list[BlackboardEntry]:
         """Blackboard posts since the last call (the loop persists them with the workflow)."""
@@ -228,7 +271,10 @@ class AgenticStrategy:
 
     def _screen(self, ctx: RepairContext, evidence: str) -> tuple[str, Verdict]:
         """Input guardrail: scan the evidence for prompt injection before any agent reads it."""
-        verdict = check_text(evidence, "evidence")
+        with tracing.span("input guardrail", "guardrail", "system") as gs:
+            verdict = check_text(evidence, "evidence")
+            if gs is not None:
+                gs.attributes.update(verdict=verdict.action, findings=verdict.summary[:200])
         status = {"allow": "ok", "flag": "flagged", "block": "blocked"}[verdict.action]
         self.records.append(AgentRecord(agent="input guardrail", framework="system", status=status,
                                         message=f"{verdict.action}: {verdict.summary}"[:400]))
@@ -237,6 +283,25 @@ class AgenticStrategy:
         return spotlight(evidence, verdict), verdict
 
     def investigate(self, ctx: RepairContext) -> InvestigationReport:
+        with self._phase(ctx, "investigate"):
+            return self._investigate(ctx)
+
+    def root_cause(self, ctx: RepairContext, investigation: InvestigationReport) -> RootCauseReport:
+        with self._phase(ctx, "root cause"):
+            return self._root_cause(ctx, investigation)
+
+    def plan(self, ctx: RepairContext, investigation: InvestigationReport,
+             root_cause: RootCauseReport) -> RepairPlan | None:
+        try:
+            with self._phase(ctx, "plan"):
+                return self._plan(ctx, investigation, root_cause)
+        finally:  # the attempt's analysis is over: close its trace and hand it to the loop
+            trace, root = self.traces.pop(ctx.attempt, (None, None))
+            if trace is not None:
+                root.end = time.time()
+                self.finished.append((ctx.attempt, trace.drain()))
+
+    def _investigate(self, ctx: RepairContext) -> InvestigationReport:
         evidence, verdict = self._screen(ctx, build_evidence(ctx))
         if self.messaging == "blackboard":
             bb = self.boards[ctx.attempt] = Blackboard(ctx.attempt)
@@ -271,7 +336,7 @@ class AgenticStrategy:
         self._cache[ctx.attempt] = (evidence, rc)
         return inv
 
-    def root_cause(self, ctx: RepairContext, investigation: InvestigationReport) -> RootCauseReport:
+    def _root_cause(self, ctx: RepairContext, investigation: InvestigationReport) -> RootCauseReport:
         _, rc = self._cache.get(ctx.attempt, ("", None))
         if rc is not None:
             return rc
@@ -280,8 +345,8 @@ class AgenticStrategy:
             bb.post("root_cause", rc, author="rule-based (fallback)", framework="rule-based", summary=rc.root_cause)
         return rc
 
-    def plan(self, ctx: RepairContext, investigation: InvestigationReport,
-             root_cause: RootCauseReport) -> RepairPlan | None:
+    def _plan(self, ctx: RepairContext, investigation: InvestigationReport,
+              root_cause: RootCauseReport) -> RepairPlan | None:
         evidence = self._cache.get(ctx.attempt, (None,))[0] or build_evidence(ctx)
         try:
             if ctx.attempt in self.blocked:
