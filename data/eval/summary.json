@@ -1,0 +1,1011 @@
+{
+ "price_per_mtok": {
+  "input": 0.25,
+  "output": 1.5
+ },
+ "runs": 42,
+ "groups": {
+  "agents": {
+   "runs": 36,
+   "success_rate": 1.0,
+   "agent_success_rate": 1.0,
+   "first_try_rate": 1.0,
+   "root_cause_correct_rate": 1.0,
+   "fallback_runs": 0,
+   "llm_errors": 2,
+   "total_cost_usd": 0.232,
+   "analysis_seconds": {
+    "median": 38.205,
+    "q1": 21.37,
+    "q3": 102.835,
+    "min": 13.99,
+    "max": 815.67
+   },
+   "wall_seconds": {
+    "median": 32.615,
+    "q1": 21.625,
+    "q3": 92.7375,
+    "min": 14.24,
+    "max": 353.91
+   },
+   "tokens": {
+    "median": 12603.0,
+    "q1": 10866.75,
+    "q3": 21578.25,
+    "min": 8160,
+    "max": 31500
+   },
+   "cost_usd": {
+    "median": 0.0058,
+    "q1": 0.0045,
+    "q3": 0.008,
+    "min": 0.003933,
+    "max": 0.011076
+   },
+   "llm_calls": {
+    "median": 10.5,
+    "q1": 9.0,
+    "q3": 11.25,
+    "min": 6,
+    "max": 14
+   },
+   "tool_calls": {
+    "median": 5.0,
+    "q1": 4.0,
+    "q3": 6.0,
+    "min": 3,
+    "max": 8
+   }
+  },
+  "guardrail": {
+   "runs": 2,
+   "success_rate": 1.0,
+   "agent_success_rate": null,
+   "first_try_rate": 1.0,
+   "root_cause_correct_rate": 1.0,
+   "fallback_runs": 2,
+   "llm_errors": 0,
+   "total_cost_usd": 0.0,
+   "analysis_seconds": {
+    "median": 0.03,
+    "q1": 0.03,
+    "q3": 0.03,
+    "min": 0.03,
+    "max": 0.03
+   },
+   "wall_seconds": {
+    "median": 0.28,
+    "q1": 0.275,
+    "q3": 0.285,
+    "min": 0.27,
+    "max": 0.29
+   },
+   "tokens": {
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "min": 0,
+    "max": 0
+   },
+   "cost_usd": {
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "min": 0.0,
+    "max": 0.0
+   },
+   "llm_calls": {
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "min": 0,
+    "max": 0
+   },
+   "tool_calls": {
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "min": 0,
+    "max": 0
+   }
+  },
+  "rules": {
+   "runs": 4,
+   "success_rate": 1.0,
+   "agent_success_rate": null,
+   "first_try_rate": 0.5,
+   "root_cause_correct_rate": 1.0,
+   "fallback_runs": 0,
+   "llm_errors": 0,
+   "total_cost_usd": 0.0,
+   "analysis_seconds": {
+    "median": 0.023,
+    "q1": 0.0225,
+    "q3": 0.0232,
+    "min": 0.021,
+    "max": 0.024
+   },
+   "wall_seconds": {
+    "median": 0.41,
+    "q1": 0.2675,
+    "q3": 0.565,
+    "min": 0.26,
+    "max": 0.61
+   },
+   "tokens": {
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "min": 0,
+    "max": 0
+   },
+   "cost_usd": {
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "min": 0.0,
+    "max": 0.0
+   },
+   "llm_calls": {
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "min": 0,
+    "max": 0
+   },
+   "tool_calls": {
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "min": 0,
+    "max": 0
+   }
+  }
+ },
+ "configurations": {
+  "hierarchical \u00b7 blackboard": {
+   "runs": 6,
+   "success_rate": 1.0,
+   "agent_success_rate": 1.0,
+   "first_try_rate": 1.0,
+   "root_cause_correct_rate": 1.0,
+   "fallback_runs": 0,
+   "llm_errors": 0,
+   "total_cost_usd": 0.034,
+   "analysis_seconds": {
+    "median": 49.53,
+    "q1": 29.435,
+    "q3": 74.0875,
+    "min": 22.85,
+    "max": 117.97
+   },
+   "wall_seconds": {
+    "median": 49.79,
+    "q1": 29.7175,
+    "q3": 74.385,
+    "min": 23.1,
+    "max": 118.29
+   },
+   "tokens": {
+    "median": 12603.0,
+    "q1": 10172.5,
+    "q3": 14012.75,
+    "min": 8160,
+    "max": 14733
+   },
+   "cost_usd": {
+    "median": 0.0058,
+    "q1": 0.0053,
+    "q3": 0.0061,
+    "min": 0.004435,
+    "max": 0.006628
+   },
+   "llm_calls": {
+    "median": 12.5,
+    "q1": 11.25,
+    "q3": 13.0,
+    "min": 11,
+    "max": 13
+   },
+   "tool_calls": {
+    "median": 6.5,
+    "q1": 5.25,
+    "q3": 7.0,
+    "min": 5,
+    "max": 7
+   }
+  },
+  "hierarchical \u00b7 direct": {
+   "runs": 6,
+   "success_rate": 1.0,
+   "agent_success_rate": 1.0,
+   "first_try_rate": 1.0,
+   "root_cause_correct_rate": 1.0,
+   "fallback_runs": 0,
+   "llm_errors": 1,
+   "total_cost_usd": 0.0321,
+   "analysis_seconds": {
+    "median": 116.285,
+    "q1": 83.8475,
+    "q3": 157.835,
+    "min": 22.78,
+    "max": 265.01
+   },
+   "wall_seconds": {
+    "median": 88.81,
+    "q1": 38.315,
+    "q3": 125.8125,
+    "min": 23.04,
+    "max": 165.8
+   },
+   "tokens": {
+    "median": 11437.5,
+    "q1": 10447.5,
+    "q3": 12390.0,
+    "min": 10333,
+    "max": 12468
+   },
+   "cost_usd": {
+    "median": 0.0054,
+    "q1": 0.0047,
+    "q3": 0.006,
+    "min": 0.004618,
+    "max": 0.006023
+   },
+   "llm_calls": {
+    "median": 11.0,
+    "q1": 11.0,
+    "q3": 11.0,
+    "min": 10,
+    "max": 14
+   },
+   "tool_calls": {
+    "median": 5.0,
+    "q1": 5.0,
+    "q3": 5.0,
+    "min": 4,
+    "max": 7
+   }
+  },
+  "parallel \u00b7 blackboard": {
+   "runs": 6,
+   "success_rate": 1.0,
+   "agent_success_rate": 1.0,
+   "first_try_rate": 1.0,
+   "root_cause_correct_rate": 1.0,
+   "fallback_runs": 0,
+   "llm_errors": 0,
+   "total_cost_usd": 0.0531,
+   "analysis_seconds": {
+    "median": 35.055,
+    "q1": 20.2925,
+    "q3": 101.14,
+    "min": 17.08,
+    "max": 815.67
+   },
+   "wall_seconds": {
+    "median": 35.325,
+    "q1": 20.5525,
+    "q3": 98.0675,
+    "min": 17.33,
+    "max": 353.91
+   },
+   "tokens": {
+    "median": 25654.0,
+    "q1": 21540.25,
+    "q3": 25873.0,
+    "min": 16836,
+    "max": 26238
+   },
+   "cost_usd": {
+    "median": 0.0093,
+    "q1": 0.0086,
+    "q3": 0.0096,
+    "min": 0.006679,
+    "max": 0.009824
+   },
+   "llm_calls": {
+    "median": 12.0,
+    "q1": 10.5,
+    "q3": 13.5,
+    "min": 10,
+    "max": 14
+   },
+   "tool_calls": {
+    "median": 6.0,
+    "q1": 4.5,
+    "q3": 7.5,
+    "min": 4,
+    "max": 8
+   }
+  },
+  "parallel \u00b7 direct": {
+   "runs": 6,
+   "success_rate": 1.0,
+   "agent_success_rate": 1.0,
+   "first_try_rate": 1.0,
+   "root_cause_correct_rate": 1.0,
+   "fallback_runs": 0,
+   "llm_errors": 0,
+   "total_cost_usd": 0.0568,
+   "analysis_seconds": {
+    "median": 23.915,
+    "q1": 22.86,
+    "q3": 28.195,
+    "min": 19.53,
+    "max": 90.67
+   },
+   "wall_seconds": {
+    "median": 24.18,
+    "q1": 23.14,
+    "q3": 28.445,
+    "min": 19.78,
+    "max": 90.93
+   },
+   "tokens": {
+    "median": 26276.0,
+    "q1": 22666.0,
+    "q3": 30119.25,
+    "min": 21545,
+    "max": 31500
+   },
+   "cost_usd": {
+    "median": 0.0095,
+    "q1": 0.0083,
+    "q3": 0.0106,
+    "min": 0.007806,
+    "max": 0.011076
+   },
+   "llm_calls": {
+    "median": 10.0,
+    "q1": 9.0,
+    "q3": 11.0,
+    "min": 9,
+    "max": 11
+   },
+   "tool_calls": {
+    "median": 4.0,
+    "q1": 3.0,
+    "q3": 5.0,
+    "min": 3,
+    "max": 5
+   }
+  },
+  "sequential \u00b7 blackboard": {
+   "runs": 6,
+   "success_rate": 1.0,
+   "agent_success_rate": 1.0,
+   "first_try_rate": 1.0,
+   "root_cause_correct_rate": 1.0,
+   "fallback_runs": 0,
+   "llm_errors": 0,
+   "total_cost_usd": 0.0283,
+   "analysis_seconds": {
+    "median": 45.745,
+    "q1": 24.8875,
+    "q3": 118.7275,
+    "min": 15.64,
+    "max": 159.64
+   },
+   "wall_seconds": {
+    "median": 46.0,
+    "q1": 25.1525,
+    "q3": 119.0025,
+    "min": 15.89,
+    "max": 159.9
+   },
+   "tokens": {
+    "median": 11756.0,
+    "q1": 11450.5,
+    "q3": 13314.0,
+    "min": 8409,
+    "max": 14122
+   },
+   "cost_usd": {
+    "median": 0.0045,
+    "q1": 0.0043,
+    "q3": 0.0052,
+    "min": 0.00403,
+    "max": 0.005648
+   },
+   "llm_calls": {
+    "median": 9.0,
+    "q1": 8.25,
+    "q3": 9.0,
+    "min": 7,
+    "max": 9
+   },
+   "tool_calls": {
+    "median": 6.0,
+    "q1": 5.25,
+    "q3": 6.0,
+    "min": 4,
+    "max": 6
+   }
+  },
+  "sequential \u00b7 direct": {
+   "runs": 6,
+   "success_rate": 1.0,
+   "agent_success_rate": 1.0,
+   "first_try_rate": 1.0,
+   "root_cause_correct_rate": 1.0,
+   "fallback_runs": 0,
+   "llm_errors": 1,
+   "total_cost_usd": 0.0278,
+   "analysis_seconds": {
+    "median": 20.67,
+    "q1": 17.555,
+    "q3": 48.3775,
+    "min": 13.99,
+    "max": 277.15
+   },
+   "wall_seconds": {
+    "median": 20.915,
+    "q1": 17.8575,
+    "q3": 48.625,
+    "min": 14.24,
+    "max": 277.39
+   },
+   "tokens": {
+    "median": 10829.5,
+    "q1": 10266.75,
+    "q3": 11076.5,
+    "min": 9882,
+    "max": 20000
+   },
+   "cost_usd": {
+    "median": 0.0044,
+    "q1": 0.0041,
+    "q3": 0.0045,
+    "min": 0.003933,
+    "max": 0.0065
+   },
+   "llm_calls": {
+    "median": 6.0,
+    "q1": 6.0,
+    "q3": 6.0,
+    "min": 6,
+    "max": 9
+   },
+   "tool_calls": {
+    "median": 3.0,
+    "q1": 3.0,
+    "q3": 3.0,
+    "min": 3,
+    "max": 5
+   }
+  }
+ },
+ "patterns": {
+  "hierarchical": {
+   "runs": 12,
+   "success_rate": 1.0,
+   "agent_success_rate": 1.0,
+   "first_try_rate": 1.0,
+   "root_cause_correct_rate": 1.0,
+   "fallback_runs": 0,
+   "llm_errors": 1,
+   "total_cost_usd": 0.0661,
+   "analysis_seconds": {
+    "median": 78.355,
+    "q1": 33.305,
+    "q3": 122.1725,
+    "min": 22.78,
+    "max": 265.01
+   },
+   "wall_seconds": {
+    "median": 70.95,
+    "q1": 26.9925,
+    "q3": 103.1925,
+    "min": 23.04,
+    "max": 165.8
+   },
+   "tokens": {
+    "median": 12385.0,
+    "q1": 10405.75,
+    "q3": 12594.5,
+    "min": 8160,
+    "max": 14733
+   },
+   "cost_usd": {
+    "median": 0.0058,
+    "q1": 0.0048,
+    "q3": 0.006,
+    "min": 0.004435,
+    "max": 0.006628
+   },
+   "llm_calls": {
+    "median": 11.0,
+    "q1": 11.0,
+    "q3": 13.0,
+    "min": 10,
+    "max": 14
+   },
+   "tool_calls": {
+    "median": 5.0,
+    "q1": 5.0,
+    "q3": 7.0,
+    "min": 4,
+    "max": 7
+   }
+  },
+  "parallel": {
+   "runs": 12,
+   "success_rate": 1.0,
+   "agent_success_rate": 1.0,
+   "first_try_rate": 1.0,
+   "root_cause_correct_rate": 1.0,
+   "fallback_runs": 0,
+   "llm_errors": 0,
+   "total_cost_usd": 0.1099,
+   "analysis_seconds": {
+    "median": 23.915,
+    "q1": 21.0775,
+    "q3": 59.1475,
+    "min": 17.08,
+    "max": 815.67
+   },
+   "wall_seconds": {
+    "median": 24.18,
+    "q1": 21.3375,
+    "q3": 59.4225,
+    "min": 17.33,
+    "max": 353.91
+   },
+   "tokens": {
+    "median": 25723.0,
+    "q1": 21644.75,
+    "q3": 26409.0,
+    "min": 16836,
+    "max": 31500
+   },
+   "cost_usd": {
+    "median": 0.0094,
+    "q1": 0.0083,
+    "q3": 0.0097,
+    "min": 0.006679,
+    "max": 0.011076
+   },
+   "llm_calls": {
+    "median": 11.0,
+    "q1": 9.75,
+    "q3": 12.0,
+    "min": 9,
+    "max": 14
+   },
+   "tool_calls": {
+    "median": 5.0,
+    "q1": 3.75,
+    "q3": 6.0,
+    "min": 3,
+    "max": 8
+   }
+  },
+  "sequential": {
+   "runs": 12,
+   "success_rate": 1.0,
+   "agent_success_rate": 1.0,
+   "first_try_rate": 1.0,
+   "root_cause_correct_rate": 1.0,
+   "fallback_runs": 0,
+   "llm_errors": 1,
+   "total_cost_usd": 0.0561,
+   "analysis_seconds": {
+    "median": 31.12,
+    "q1": 18.7575,
+    "q3": 78.4925,
+    "min": 13.99,
+    "max": 277.15
+   },
+   "wall_seconds": {
+    "median": 31.365,
+    "q1": 19.04,
+    "q3": 78.75,
+    "min": 14.24,
+    "max": 277.39
+   },
+   "tokens": {
+    "median": 11244.0,
+    "q1": 10592.25,
+    "q3": 12286.0,
+    "min": 8409,
+    "max": 20000
+   },
+   "cost_usd": {
+    "median": 0.0044,
+    "q1": 0.0042,
+    "q3": 0.0047,
+    "min": 0.003933,
+    "max": 0.0065
+   },
+   "llm_calls": {
+    "median": 7.5,
+    "q1": 6.0,
+    "q3": 9.0,
+    "min": 6,
+    "max": 9
+   },
+   "tool_calls": {
+    "median": 4.5,
+    "q1": 3.0,
+    "q3": 6.0,
+    "min": 3,
+    "max": 6
+   }
+  }
+ },
+ "messaging": {
+  "blackboard": {
+   "runs": 18,
+   "success_rate": 1.0,
+   "agent_success_rate": 1.0,
+   "first_try_rate": 1.0,
+   "root_cause_correct_rate": 1.0,
+   "fallback_runs": 0,
+   "llm_errors": 0,
+   "total_cost_usd": 0.1154,
+   "analysis_seconds": {
+    "median": 44.905,
+    "q1": 21.815,
+    "q3": 107.855,
+    "min": 15.64,
+    "max": 815.67
+   },
+   "wall_seconds": {
+    "median": 45.17,
+    "q1": 22.0725,
+    "q3": 105.2925,
+    "min": 15.89,
+    "max": 353.91
+   },
+   "tokens": {
+    "median": 13975.0,
+    "q1": 11748.0,
+    "q3": 19376.25,
+    "min": 8160,
+    "max": 26238
+   },
+   "cost_usd": {
+    "median": 0.0058,
+    "q1": 0.0047,
+    "q3": 0.008,
+    "min": 0.00403,
+    "max": 0.009824
+   },
+   "llm_calls": {
+    "median": 11.0,
+    "q1": 9.0,
+    "q3": 12.75,
+    "min": 7,
+    "max": 14
+   },
+   "tool_calls": {
+    "median": 6.0,
+    "q1": 5.0,
+    "q3": 6.75,
+    "min": 4,
+    "max": 8
+   }
+  },
+  "direct": {
+   "runs": 18,
+   "success_rate": 1.0,
+   "agent_success_rate": 1.0,
+   "first_try_rate": 1.0,
+   "root_cause_correct_rate": 1.0,
+   "fallback_runs": 0,
+   "llm_errors": 2,
+   "total_cost_usd": 0.1167,
+   "analysis_seconds": {
+    "median": 26.91,
+    "q1": 21.465,
+    "q3": 96.01,
+    "min": 13.99,
+    "max": 277.15
+   },
+   "wall_seconds": {
+    "median": 24.595,
+    "q1": 21.715,
+    "q3": 88.0625,
+    "min": 14.24,
+    "max": 277.39
+   },
+   "tokens": {
+    "median": 12385.0,
+    "q1": 10563.75,
+    "q3": 21644.75,
+    "min": 9882,
+    "max": 31500
+   },
+   "cost_usd": {
+    "median": 0.0059,
+    "q1": 0.0045,
+    "q3": 0.0079,
+    "min": 0.003933,
+    "max": 0.011076
+   },
+   "llm_calls": {
+    "median": 9.5,
+    "q1": 6.75,
+    "q3": 11.0,
+    "min": 6,
+    "max": 14
+   },
+   "tool_calls": {
+    "median": 4.5,
+    "q1": 3.0,
+    "q3": 5.0,
+    "min": 3,
+    "max": 7
+   }
+  }
+ },
+ "scenarios": {
+  "agents \u00b7 failed_first_repair": {
+   "runs": 18,
+   "success_rate": 1.0,
+   "agent_success_rate": 1.0,
+   "first_try_rate": 1.0,
+   "root_cause_correct_rate": 1.0,
+   "fallback_runs": 0,
+   "llm_errors": 1,
+   "total_cost_usd": 0.1237,
+   "analysis_seconds": {
+    "median": 31.37,
+    "q1": 22.6825,
+    "q3": 72.5025,
+    "min": 15.64,
+    "max": 165.52
+   },
+   "wall_seconds": {
+    "median": 31.645,
+    "q1": 22.9575,
+    "q3": 72.7975,
+    "min": 15.89,
+    "max": 165.8
+   },
+   "tokens": {
+    "median": 13975.0,
+    "q1": 11444.25,
+    "q3": 24174.75,
+    "min": 8409,
+    "max": 31500
+   },
+   "cost_usd": {
+    "median": 0.006,
+    "q1": 0.0052,
+    "q3": 0.0093,
+    "min": 0.00403,
+    "max": 0.011076
+   },
+   "llm_calls": {
+    "median": 11.0,
+    "q1": 9.0,
+    "q3": 11.75,
+    "min": 6,
+    "max": 14
+   },
+   "tool_calls": {
+    "median": 5.0,
+    "q1": 4.0,
+    "q3": 6.0,
+    "min": 3,
+    "max": 7
+   }
+  },
+  "agents \u00b7 simple_bug": {
+   "runs": 18,
+   "success_rate": 1.0,
+   "agent_success_rate": 1.0,
+   "first_try_rate": 1.0,
+   "root_cause_correct_rate": 1.0,
+   "fallback_runs": 0,
+   "llm_errors": 1,
+   "total_cost_usd": 0.1083,
+   "analysis_seconds": {
+    "median": 57.07,
+    "q1": 19.9925,
+    "q3": 112.925,
+    "min": 13.99,
+    "max": 815.67
+   },
+   "wall_seconds": {
+    "median": 40.155,
+    "q1": 20.25,
+    "q3": 96.3525,
+    "min": 14.24,
+    "max": 353.91
+   },
+   "tokens": {
+    "median": 12179.0,
+    "q1": 10447.5,
+    "q3": 21158.75,
+    "min": 8160,
+    "max": 26922
+   },
+   "cost_usd": {
+    "median": 0.0053,
+    "q1": 0.0045,
+    "q3": 0.0075,
+    "min": 0.003933,
+    "max": 0.009431
+   },
+   "llm_calls": {
+    "median": 10.0,
+    "q1": 9.0,
+    "q3": 11.0,
+    "min": 6,
+    "max": 14
+   },
+   "tool_calls": {
+    "median": 5.0,
+    "q1": 4.0,
+    "q3": 6.0,
+    "min": 3,
+    "max": 8
+   }
+  },
+  "guardrail \u00b7 injected_commit": {
+   "runs": 2,
+   "success_rate": 1.0,
+   "agent_success_rate": null,
+   "first_try_rate": 1.0,
+   "root_cause_correct_rate": 1.0,
+   "fallback_runs": 2,
+   "llm_errors": 0,
+   "total_cost_usd": 0.0,
+   "analysis_seconds": {
+    "median": 0.03,
+    "q1": 0.03,
+    "q3": 0.03,
+    "min": 0.03,
+    "max": 0.03
+   },
+   "wall_seconds": {
+    "median": 0.28,
+    "q1": 0.275,
+    "q3": 0.285,
+    "min": 0.27,
+    "max": 0.29
+   },
+   "tokens": {
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "min": 0,
+    "max": 0
+   },
+   "cost_usd": {
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "min": 0.0,
+    "max": 0.0
+   },
+   "llm_calls": {
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "min": 0,
+    "max": 0
+   },
+   "tool_calls": {
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "min": 0,
+    "max": 0
+   }
+  },
+  "rules \u00b7 failed_first_repair": {
+   "runs": 2,
+   "success_rate": 1.0,
+   "agent_success_rate": null,
+   "first_try_rate": 0.0,
+   "root_cause_correct_rate": 1.0,
+   "fallback_runs": 0,
+   "llm_errors": 0,
+   "total_cost_usd": 0.0,
+   "analysis_seconds": {
+    "median": 0.023,
+    "q1": 0.023,
+    "q3": 0.023,
+    "min": 0.023,
+    "max": 0.023
+   },
+   "wall_seconds": {
+    "median": 0.58,
+    "q1": 0.565,
+    "q3": 0.595,
+    "min": 0.55,
+    "max": 0.61
+   },
+   "tokens": {
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "min": 0,
+    "max": 0
+   },
+   "cost_usd": {
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "min": 0.0,
+    "max": 0.0
+   },
+   "llm_calls": {
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "min": 0,
+    "max": 0
+   },
+   "tool_calls": {
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "min": 0,
+    "max": 0
+   }
+  },
+  "rules \u00b7 simple_bug": {
+   "runs": 2,
+   "success_rate": 1.0,
+   "agent_success_rate": null,
+   "first_try_rate": 1.0,
+   "root_cause_correct_rate": 1.0,
+   "fallback_runs": 0,
+   "llm_errors": 0,
+   "total_cost_usd": 0.0,
+   "analysis_seconds": {
+    "median": 0.0225,
+    "q1": 0.0217,
+    "q3": 0.0233,
+    "min": 0.021,
+    "max": 0.024
+   },
+   "wall_seconds": {
+    "median": 0.265,
+    "q1": 0.2625,
+    "q3": 0.2675,
+    "min": 0.26,
+    "max": 0.27
+   },
+   "tokens": {
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "min": 0,
+    "max": 0
+   },
+   "cost_usd": {
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "min": 0.0,
+    "max": 0.0
+   },
+   "llm_calls": {
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "min": 0,
+    "max": 0
+   },
+   "tool_calls": {
+    "median": 0.0,
+    "q1": 0.0,
+    "q3": 0.0,
+    "min": 0,
+    "max": 0
+   }
+  }
+ },
+ "totals": {
+  "llm_calls": 363,
+  "tokens": 583406,
+  "cost_usd": 0.232,
+  "wall_hours": 0.69
+ }
+}

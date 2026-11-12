@@ -5,14 +5,16 @@ Every message first passes the input guardrail (app/security): prompt injection 
 before any retrieval or model call, and secrets are redacted from every answer.
 
 * heuristic (default, offline): live-data intents + TF-IDF retrieval over the knowledge base.
-* anthropic: Claude answers, grounded in the whole knowledge base (cached system prompt) plus
-  the live data for this turn. Any API failure or refusal falls back to the heuristic answer.
+* gemini: Gemini answers (the agents' model and key), grounded in the whole knowledge base (system
+  instruction) plus the live data for this turn. Any API failure or refusal falls back to the
+  heuristic answer, and the reply says so.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 
 from app.assistant.knowledge import Hit, KnowledgeBase
@@ -35,8 +37,7 @@ MIN_SCORE = 0.08     # below this the retrieval match is too weak to answer from
 MIN_COVERAGE = 0.5   # ...and more than half the question's topic words must appear in the answer
 STRONG_SCORE = 0.3   # a match this strong is trusted even with lower coverage
 HISTORY_TURNS = 20
-FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"}
-FALLBACK_BETA = "server-side-fallback-2026-07-01"
+DECLINED = {"SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION"}  # Gemini finish reasons
 
 SUGGESTIONS = [
     "What does this project do?",
@@ -101,10 +102,14 @@ class Assistant:
 
     @property
     def provider(self) -> str:
-        return "anthropic" if self.cfg.llm_provider.lower() == "anthropic" else "heuristic"
+        return "gemini" if self.cfg.llm_provider.lower() == "gemini" else "heuristic"
+
+    @property
+    def model(self) -> str:
+        return self.cfg.llm_model or self.cfg.agent_model  # the agents' Gemini model unless overridden
 
     def info(self) -> dict:
-        return {"provider": self.provider, "model": self.cfg.llm_model if self.provider == "anthropic" else None,
+        return {"provider": self.provider, "model": self.model if self.provider == "gemini" else None,
                 "knowledge_sections": len(self.kb.sections), "suggestions": SUGGESTIONS}
 
     # ------------------------------------------------------------------ entry point
@@ -135,13 +140,13 @@ class Assistant:
         digest = workflow_digest(self.store, wf_id) if wf_id else None  # KeyError -> 404 at the API
         hits = self.kb.search(message, k=3)
 
-        if self.provider == "anthropic":
+        if self.provider == "gemini":
             try:
-                return self._claude(message, history or [], digest, hits)
-            except Exception as exc:  # network, auth, rate limit, refusal: answer offline instead
-                log.warning("assistant: Claude unavailable (%s); answering offline", type(exc).__name__)
+                return self._gemini(message, history or [], digest, hits)
+            except Exception as exc:  # network, key, rate limit, refusal: answer offline instead
+                log.warning("assistant: Gemini unavailable (%s); answering offline", type(exc).__name__)
                 reply = self._heuristic(message, digest, hits, explicit_wf=bool(mentioned))
-                reply.note = f"Claude was unavailable ({type(exc).__name__}), so this answer comes from offline mode."
+                reply.note = f"Gemini was unavailable ({type(exc).__name__}), so this answer comes from offline mode."
                 return reply
         return self._heuristic(message, digest, hits, explicit_wf=bool(mentioned))
 
@@ -184,50 +189,62 @@ class Assistant:
             return False
         return hit.score >= STRONG_SCORE or self.kb.coverage(message, hit.section) > MIN_COVERAGE
 
-    # ------------------------------------------------------------------ Claude
+    # ------------------------------------------------------------------ Gemini
 
     def _get_client(self):
         if self._client is None:
-            import anthropic  # optional at import time: offline mode works without the SDK
+            from google import genai  # optional at import time: offline mode works without the SDK
+            from google.genai import types
 
-            kwargs = {"api_key": self.cfg.llm_api_key} if self.cfg.llm_api_key else {}
-            self._client = anthropic.Anthropic(timeout=90.0, max_retries=2, **kwargs)
+            key = self.cfg.llm_api_key or self.cfg.google_api_key or self.cfg.gemini_api_key
+            self._client = genai.Client(api_key=key or None, http_options=types.HttpOptions(timeout=90_000))
         return self._client
 
-    def _claude(self, message: str, history: list[dict], digest: dict | None, hits: list[Hit]) -> ChatReply:
+    def _generate(self, contents, config, retry_wait: float = 2.0):
+        """One quick retry on a transient error (503 / overloaded); a chat reply should not wait longer -
+        if it still fails, the caller answers offline."""
+        from app.agents.retry import is_transient, retry_after
+
+        try:
+            return self._get_client().models.generate_content(model=self.model, contents=contents, config=config)
+        except Exception as exc:
+            if not is_transient(exc) or (retry_after(exc) or 0) > 5:
+                raise
+            time.sleep(retry_wait)
+            return self._get_client().models.generate_content(model=self.model, contents=contents, config=config)
+
+    def _gemini(self, message: str, history: list[dict], digest: dict | None, hits: list[Hit]) -> ChatReply:
+        from google.genai import types
+
         live = [render_snapshot(snapshot(self.store, self.predictor))]
         if digest:
             live.append(render_digest(digest))
         turns = [{"role": t["role"], "content": t["content"]} for t in history[-HISTORY_TURNS:]
                  if t.get("role") in ("user", "assistant") and t.get("content")]
-        while turns and turns[0]["role"] != "user":  # the API requires the first turn to be the user's
+        while turns and turns[0]["role"] != "user":  # a conversation starts with the user's turn
             turns.pop(0)
-        turns.append({"role": "user", "content": "<live_data>\n" + "\n\n".join(live) + "\n</live_data>\n\n"
-                                                 f"<question>\n{message}\n</question>"})
+        contents = [types.Content(role="user" if t["role"] == "user" else "model", parts=[types.Part(text=t["content"])])
+                    for t in turns]
+        contents.append(types.Content(role="user", parts=[types.Part(
+            text="<live_data>\n" + "\n\n".join(live) + "\n</live_data>\n\n" f"<question>\n{message}\n</question>")]))
+        config = types.GenerateContentConfig(
+            # Same instructions + whole knowledge base every turn: a stable prefix the API can cache implicitly.
+            system_instruction=SYSTEM_PROMPT + "\n\n<project_knowledge>\n" + self.kb.render() + "\n</project_knowledge>",
+            temperature=0.2, max_output_tokens=4096)
+        response = self._generate(contents, config)
 
-        params = {
-            "model": self.cfg.llm_model,
-            "max_tokens": 16000,
-            # Stable prefix first: instructions + knowledge are identical every turn, so they are cached.
-            "system": [
-                {"type": "text", "text": SYSTEM_PROMPT},
-                {"type": "text", "text": "<project_knowledge>\n" + self.kb.render() + "\n</project_knowledge>",
-                 "cache_control": {"type": "ephemeral"}},
-            ],
-            "messages": turns,
-            "output_config": {"effort": self.cfg.llm_effort},
-        }
-        if self.cfg.llm_model in FALLBACK_MODELS:  # server-side retry on another model if this one declines
-            params |= {"betas": [FALLBACK_BETA], "fallbacks": "default"}
-        response = self._get_client().beta.messages.create(**params)
-
-        if response.stop_reason == "refusal":
-            raise RuntimeError("model declined the request")
-        text = "\n".join(b.text for b in response.content if b.type == "text").strip()
+        blocked = getattr(getattr(response, "prompt_feedback", None), "block_reason", None)
+        if blocked:
+            raise RuntimeError(f"prompt blocked by the model ({blocked})")
+        candidate = (response.candidates or [None])[0]
+        reason = getattr(getattr(candidate, "finish_reason", None), "name", None) or str(
+            getattr(candidate, "finish_reason", "") or "")
+        if reason in DECLINED:
+            raise RuntimeError(f"model declined the request ({reason})")
+        text = (response.text or "").strip()
         if not text:
-            raise RuntimeError(f"empty response (stop_reason={response.stop_reason})")
+            raise RuntimeError(f"empty response (finish_reason={reason or 'unknown'})")
         sources = [h.section.label for h in hits if h.score >= hits[0].score * 0.6 and self._confident(message, hits[0])]
         if digest:
             sources.insert(0, f"Live data › workflow {digest['id']}")
-        return ChatReply(text, "anthropic", sources, model=response.model,
-                         workflow_id=digest["id"] if digest else None)
+        return ChatReply(text, "gemini", sources, model=self.model, workflow_id=digest["id"] if digest else None)

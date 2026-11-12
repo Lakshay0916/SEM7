@@ -177,7 +177,8 @@ NumPy for the risk model; FastAPI and Uvicorn for the backend API; Streamlit for
 SQLAlchemy with PostgreSQL 16 (SQLite when run without Docker) as the database; git for sandbox repos
 and repair branches; Docker and Docker Compose for the containers (ui, api, PostgreSQL, plus the two agent services); GitHub Actions for CI; AWS EC2
 with Caddy for deployment; Google ADK and CrewAI on Gemini for the AI repair agents (separate
-`SEM7-agents` environment); and optionally the Anthropic Claude API for this assistant.
+`SEM7-agents` environment); Gemini is also the optional LLM for this assistant, so the project uses one
+LLM provider.
 
 ## How do I run the tests?
 Project tests: `conda activate SEM7` then `python -m pytest -q` (or
@@ -246,8 +247,9 @@ runs again with it. Every post keeps its author, framework, time and content and
 see the Blackboard panel in each attempt. The alternative messaging architecture is direct hand-off
 (`AGENT_MESSAGING=direct`): each agent passes its output straight to the next (ADK session state, then CrewAI
 task context), with no shared board. You choose between them on the Run Pipeline page when AI agents are
-selected. In one live comparison the blackboard used about 2.6 times fewer CrewAI prompt tokens, because each
-agent receives only what it needs from the board.
+selected. An early single run suggested the blackboard used fewer tokens, but the 36-run evaluation shows no
+clear difference in tokens or time between blackboard and direct hand-off; the blackboard's value is
+the full record of every post, retries with feedback, and agents that do not depend on each other.
 
 ## Which MCP tools do the agents use?
 Two MCP (Model Context Protocol) servers give the agents tools; ADK connects with `McpToolset` and CrewAI with
@@ -329,12 +331,24 @@ with the audit trail (every state change and decision) and the blackboard (who p
 this covers observability: tracing, audit and provenance. API: GET /workflows/{id}/trace and
 GET /monitoring/agents.
 
+## How were the agents evaluated? Results, cost, boxplots
+scripts/run_evaluation.py ran the whole self-healing loop 42 times on Gemini's free tier: every
+combination of the three patterns (sequential, parallel, hierarchical), two messaging modes
+(blackboard, direct) and two scenarios, three times each (36 agent runs), plus a rule-based baseline
+and the injected-commit scenario. Each run is measured from its own records: success, attempts, whether
+the root cause named the broken function, time, LLM calls and tokens from the traces, and cost as
+tokens times Gemini 3.1 Flash-Lite's list price. Results (data/eval/EVALUATION.md and the Evaluation
+page, with boxplots): the agents fixed all 36 runs on their own and on the first attempt, where the
+rules need two attempts for scenario 3; a run costs a median of about 12,600 tokens, about $0.006;
+parallel uses about 2.3 times the tokens of sequential, hierarchical is the slowest, and blackboard
+versus direct shows no clear difference in cost. Both injected commits were blocked before any LLM call.
+Some runs took minutes because single LLM calls waited on the free tier, so medians are compared.
+
 ## What is planned next?
 Already built for Agentic AI: the ADK + CrewAI agents, the blackboard (and direct hand-off), MCP tools,
 A2A agent services, sequential / parallel / hierarchical agent patterns, prompt-injection and
-toxicity guardrails tested with personas, tracing with per-agent heat maps, and cloud deployment of
-everything on AWS EC2. Still to come for Agentic AI: a 40-run evaluation with boxplots that compares
-the patterns and messaging modes on time, tokens, cost and success.
+toxicity guardrails tested with personas, tracing with per-agent heat maps, a 42-run evaluation with
+boxplots, and cloud deployment of everything on AWS EC2. All 11 Agentic AI requirements are covered.
 After that, for DevOps: Terraform for infrastructure as code, automatic deployment (CD) from GitHub
 Actions, monitoring dashboards, and a real GitHub PR adapter.
 
@@ -343,9 +357,9 @@ The assistant answers questions about the project and your workflow runs. It rea
 base (this FAQ, the README, the deployment guide and the risk model evaluation) plus live data from the
 database (workflow counts, recent runs, and the full trace of a selected workflow). In offline mode
 (`LLM_PROVIDER=heuristic`, the default) it finds the best-matching passages with TF-IDF search and
-answers from them, quoting its sources. With `LLM_PROVIDER=anthropic` and `LLM_API_KEY` set, Claude writes
-the answer grounded in the same knowledge and live data; if the API call fails it falls back to offline
-mode. The assistant only reads data - it never runs pipelines, approves fixes or changes code.
+answers from them, quoting its sources. With `LLM_PROVIDER=gemini`, Gemini (the same model and key as
+the agents) writes the answer grounded in the same knowledge and live data; if the API call fails it
+falls back to offline mode. The assistant only reads data - it never runs pipelines, approves fixes or changes code.
 
 ## What do ROC-AUC, PR-AUC, precision and recall mean?
 ROC-AUC: the probability that a random failing commit gets a higher risk score than a random passing

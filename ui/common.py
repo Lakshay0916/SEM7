@@ -28,3 +28,27 @@ def hbar(df: pd.DataFrame, cat: str, val: str, fmt: str, x_title: str, sort="-x"
         text=alt.Text(f"{val}:Q", format=fmt)
     )
     return (bars + labels).properties(height=alt.Step(30))
+
+
+PATTERN_COLORS = {"light": ["#2a78d6", "#eb6834", "#1baf7a"], "dark": ["#3987e5", "#d95926", "#199e70"]}
+SURFACE = {"light": "#fcfcfb", "dark": "#1a1a19"}
+
+
+def boxplot(df: pd.DataFrame, cat: str, val: str, hue: str, order: list[str], hue_order: list[str], title: str,
+            fmt: str, tooltip: list[str], log: bool = False) -> alt.Chart:
+    """Box (min-max whiskers, quartiles, median) per category, with every run drawn as a dot on top -
+    small samples, so the individual runs stay visible. `log` for heavily skewed measures (time)."""
+    mode = "dark" if is_dark() else "light"
+    ink = "#0b0b0b" if mode == "light" else "#f0efec"
+    colors = alt.Color(f"{hue}:N", scale=alt.Scale(domain=hue_order, range=PATTERN_COLORS[mode][:len(hue_order)]),
+                       legend=alt.Legend(title=None, orient="top", direction="horizontal"))
+    x = alt.X(f"{cat}:N", sort=order, title=None, axis=alt.Axis(labelAngle=-20, labelLimit=200))
+    y = alt.Y(f"{val}:Q", title=title + (" - log scale" if log else ""), axis=alt.Axis(format=fmt, gridOpacity=0.35),
+              scale=alt.Scale(type="log") if log else alt.Undefined)
+    box = alt.Chart(df).mark_boxplot(extent="min-max", size=34, opacity=0.35,
+                                     median={"strokeWidth": 2.5, "color": ink},
+                                     rule={"strokeWidth": 1.5}, ticks={"size": 12}).encode(x=x, y=y, color=colors)
+    dots = alt.Chart(df).mark_circle(size=55, opacity=0.95, stroke=SURFACE[mode], strokeWidth=1.5).encode(
+        x=x, y=y, color=colors,
+        tooltip=[alt.Tooltip(t) for t in tooltip] + [alt.Tooltip(f"{val}:Q", format=fmt, title=title)])
+    return (box + dots).properties(height=320)

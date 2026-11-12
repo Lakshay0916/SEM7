@@ -68,6 +68,7 @@ class ApiClient:
         return self._req("GET", f"/workflows/{wf_id}/trace?attempt={attempt}&format=otlp")
 
     def agent_monitoring(self) -> dict: return self._req("GET", "/monitoring/agents")
+    def agent_evaluation(self) -> dict: return self._req("GET", "/evaluation")
 
     # guardrails
     def guardrail_check(self, text: str, context: str = "chat") -> dict:

@@ -41,7 +41,7 @@ def isolated_backend(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(
     "module", ["ui.views.dashboard", "ui.views.how_it_works", "ui.views.workflows", "ui.views.risk_model",
-               "ui.views.guardrails", "ui.views.monitoring"]
+               "ui.views.guardrails", "ui.views.monitoring", "ui.views.evaluation"]
 )
 def test_page_renders_without_errors(module):
     at = _page(module).run()

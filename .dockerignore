@@ -13,3 +13,6 @@ workspace
 # mined raw CI metadata is only needed to re-mine; the trained model and evaluation are kept
 data/risk/raw
 data/risk/rows
+# evaluation runs: keep the results (runs.jsonl, summary.json, EVALUATION.md), not their sandboxes / database
+data/eval/workspace
+**/*.sqlite3

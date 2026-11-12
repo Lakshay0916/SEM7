@@ -50,7 +50,7 @@ def chat_panel() -> None:
         head.markdown("**💬 SEM7 Assistant**")
         if clear.button("Clear", key="chat_clear", icon=":material/delete:", type="tertiary"):
             st.session_state[HISTORY_KEY] = []
-        st.caption(f"🧠 Claude (`{info['model']}`)" if info["provider"] == "anthropic"
+        st.caption(f"🧠 Gemini (`{info['model']}`)" if info["provider"] == "gemini"
                    else "📴 Offline mode · answers from project docs + live data")
 
         ids = [None] + [w["id"] for w in wfs]

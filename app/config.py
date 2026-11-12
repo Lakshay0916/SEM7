@@ -38,9 +38,9 @@ class Settings:
     protected_branches: tuple[str, ...] = ("main", "master")
     repair_branch_prefix: str = "ai/repair/"
 
+    # Project assistant: "heuristic" (offline, default) or "gemini" (LLM answers with the agents' key and model)
     llm_provider: str = field(default_factory=lambda: os.getenv("LLM_PROVIDER") or "heuristic")
-    llm_model: str = field(default_factory=lambda: os.getenv("LLM_MODEL") or "claude-opus-5-5")
-    llm_effort: str = field(default_factory=lambda: os.getenv("LLM_EFFORT") or "medium")
+    llm_model: str = field(default_factory=lambda: os.getenv("LLM_MODEL") or "")  # empty = AGENT_MODEL
     llm_api_key: str = field(default_factory=lambda: os.getenv("LLM_API_KEY", ""), repr=False)
     github_token: str = field(default_factory=lambda: os.getenv("GITHUB_TOKEN", ""), repr=False)
 

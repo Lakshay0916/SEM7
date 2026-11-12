@@ -34,6 +34,7 @@ from app.security.input_guard import check_text
 from app.security.personas import run_personas
 
 RISK_DIR = PROJECT_ROOT / "data" / "risk"
+EVAL_DIR = PROJECT_ROOT / "data" / "eval"
 
 app = FastAPI(
     title="SEM7 Self-Healing CI/CD API",
@@ -270,6 +271,16 @@ def risk_evaluation() -> dict:
             "caveats": caveats}
 
 
+@app.get("/evaluation", tags=["evaluation"])
+def agent_evaluation() -> dict:
+    """The agent evaluation (scripts/run_evaluation.py): every run's measurements and the summary."""
+    runs_file = EVAL_DIR / "runs.jsonl"
+    runs = [json.loads(line) for line in runs_file.read_text(encoding="utf-8").splitlines() if line.strip()] \
+        if runs_file.exists() else []
+    summary = EVAL_DIR / "summary.json"
+    return {"runs": runs, "summary": json.loads(summary.read_text(encoding="utf-8")) if summary.exists() else None}
+
+
 # --------------------------------------------------------------------------- guardrails
 
 
@@ -296,7 +307,7 @@ def guardrail_personas() -> dict:
 
 @app.get("/assistant", tags=["assistant"])
 def assistant_info() -> dict:
-    """Which answer mode is active (offline heuristic or Claude) and suggested questions."""
+    """Which answer mode is active (offline heuristic or Gemini) and suggested questions."""
     return get_assistant().info()
 
 

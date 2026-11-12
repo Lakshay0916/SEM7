@@ -95,7 +95,7 @@ healthy `main` and a feature branch carrying the scenario's buggy commit.
 | 12 | PR adapter | done — local adapter (GitHub adapter todo) |
 | IDT | Quality gate, 3-container Docker stack (ui + api + PostgreSQL), GitHub Actions (Linux + Windows + compose e2e), Markdown reports | done |
 | IDT | Deployment on AWS EC2 (AWS CLI + Docker Compose + Caddy HTTPS) | done — see `docs/DEPLOY.md` |
-| UI | Project assistant (chatbot): answers questions about the project and workflow runs | done — offline by default, Claude optional |
+| UI | Project assistant (chatbot): answers questions about the project and workflow runs | done — offline by default, Gemini optional |
 | 5, 7 (LLM) | Multi-agent repair: Google ADK analysts + CrewAI planner/reviewer on Gemini | done (stages 1-4: agents, blackboard, MCP tools, A2A services) — `REPAIR_STRATEGY=agents` |
 
 ## DevOps / IDT pipeline
@@ -174,6 +174,14 @@ default stays `rules` (CI, Docker and the EC2 stack need no API key).
   **🧵 Trace** waterfall per attempt (and *Download OTLP JSON* for Jaeger / Tempo / Honeycomb),
   `GET /workflows/{id}/trace[?format=otlp]`; the **📡 Agent Monitoring** page shows heat maps of every agent
   (time, tokens, LLM calls, tool calls, errors) and of every agent in every attempt (`GET /monitoring/agents`).
+- **Evaluation (`scripts/run_evaluation.py`, `data/eval/EVALUATION.md`, 📊 **Evaluation** page):** 42 runs of
+  the whole loop - 3 patterns x 2 messaging modes x 2 scenarios x 3 repeats, a rule-based baseline, and the
+  injected-commit scenario - each measured from its own records (traces for LLM calls and tokens; cost =
+  tokens x list price). Results: the agents fixed **36 / 36** runs on their own, all on the first attempt
+  (rules: 50% first try); median **12.6k tokens ≈ $0.006** per run; parallel costs **2.3x** the tokens of
+  sequential; hierarchical is the slowest; blackboard and direct show **no clear cost difference**; the
+  guardrail blocked both injected commits with **0** LLM calls. Boxplots in `data/eval/boxplot_*.png`.
+  Free-tier runs: resumable, paced, and they stop cleanly on a daily quota error.
 - **MCP tools (`AGENT_TOOLS=1`):** two MCP servers (`app/mcp_servers/`), launched over stdio and scoped to the one
   repair, so tools never see other paths or databases:
 
@@ -221,7 +229,7 @@ It is read-only: it never runs pipelines, approves fixes or changes code.
 - **Knowledge:** a curated FAQ (`app/assistant/faq.md`) plus this README, `docs/DEPLOY.md` and the risk-model evaluation, split into sections.
 - **Live data:** workflow counts and recent runs from the database; pick a workflow in the chat panel (it defaults to the run open on Run Pipeline) to ask "why did this run fail?" or "what happens next?".
 - **Offline mode (default, `LLM_PROVIDER=heuristic`):** TF-IDF search picks the best-matching answer and lists its sources; off-topic questions get "I don't know" instead of a weak match.
-- **Claude mode (`LLM_PROVIDER=anthropic`, `LLM_API_KEY=...`, `LLM_MODEL` default `claude-opus-5-5`):** Claude writes the answer grounded in the whole knowledge base (prompt-cached system prompt) and the live data for the question. API errors or refusals fall back to the offline answer.
+- **Gemini mode (`LLM_PROVIDER=gemini`):** Gemini writes the answer grounded in the whole knowledge base (system instruction) and the live data for the question, with the agents' key and model (`GOOGLE_API_KEY`, `AGENT_MODEL`; `LLM_API_KEY` / `LLM_MODEL` override them). API errors or refusals fall back to the offline answer and say so. The project uses one LLM provider (Gemini) throughout.
 
 ## Deployment (AWS EC2)
 
