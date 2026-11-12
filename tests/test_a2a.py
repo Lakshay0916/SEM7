@@ -73,11 +73,16 @@ def services():
         return {"result": PlanReview(approved=True, final_plan=DRAFT).model_dump(mode="json"),
                 "records": _rec("Repair Planner", "crewai")}
 
+    def crew_lead_plan(p):  # hierarchical pattern: the Repair Lead's crew, as one skill
+        seen["crew"].append(("lead_plan", p))
+        return {"result": PlanReview(approved=True, final_plan=DRAFT).model_dump(mode="json"),
+                "records": _rec("Repair Lead → Repair Planner", "crewai") + _rec("Repair Lead", "crewai")}
+
     def boom(p):
         raise ValueError("planner exploded")
 
     crew_url = serve("fake-crew", {"plan": crew_plan, "review": crew_review, "plan_and_review": crew_plan_and_review,
-                                   "boom": boom})
+                                   "lead_plan": crew_lead_plan, "boom": boom})
 
     def adk_investigator(p):
         seen["adk"].append(("investigator", p))
@@ -95,7 +100,15 @@ def services():
                            "review": crew["result"]},
                 "records": _rec("investigator", "adk") + crew["records"]}
 
+    def adk_parallel_investigation(p):
+        seen["adk"].append(("parallel_investigation", p))
+        findings = {n: {"focus": n, "facts": [f"FACT: {n}"], "hypotheses": [], "suspect_functions": []}
+                    for n in ("test_analyst", "change_analyst", "history_analyst")}
+        return {"result": {"investigation": INV.model_dump(mode="json"), "findings": findings},
+                "records": [r for n in findings for r in _rec(n, "adk")]}
+
     adk_url = serve("fake-adk", {"investigator": adk_investigator, "root_cause_analyst": adk_root_cause,
+                                 "parallel_investigation": adk_parallel_investigation,
                                  "analyse_and_plan": adk_analyse_and_plan})
     return {"adk": adk_url, "crew": crew_url, "seen": seen}
 
@@ -180,3 +193,31 @@ def test_unreachable_agents_fall_back_and_strategies_report_it(store, monkeypatc
     wf = run_ci_workflow("simple_bug", store, None, strategy=None).workflow_id
     plan = propose_fix(store, wf, AgenticStrategy(messaging="blackboard", transport="a2a", fallback=True))
     assert plan.strategy == "rule-based" and any(e["status"] == "fallback" for e in store.events(wf))
+
+
+def test_patterns_over_a2a_call_the_matching_skills(store, services, monkeypatch):
+    monkeypatch.setattr(remote, "settings", replace(remote.settings, adk_agent_url=services["adk"],
+                                                    crew_agent_url=services["crew"]))
+    hops = {}
+    for pattern in ("parallel", "hierarchical"):
+        wf = run_ci_workflow("simple_bug", store, None, strategy=None).workflow_id
+        plan = propose_fix(store, wf, AgenticStrategy(messaging="blackboard", transport="a2a", fallback=False,
+                                                      pattern=pattern))
+        assert plan.changes[0].replacement == GOOD_ADD
+        hops[pattern] = [e["agent"] for e in store.events(wf) if e["agent"].startswith("a2a:")]
+        board = [a["payload"]["key"] for a in store.artifacts(wf, "blackboard")]
+        if pattern == "parallel":
+            assert {"finding:test_analyst", "finding:change_analyst", "finding:history_analyst"} <= set(board)
+    assert hops["parallel"][0] == "a2a:blackboard → sem7-adk/parallel_investigation"
+    assert hops["hierarchical"][-1] == "a2a:blackboard → sem7-crewai/lead_plan"
+    assert not any("/plan" in h and "lead_plan" not in h for h in hops["hierarchical"])  # the lead owns planning
+
+
+def test_direct_over_a2a_carries_the_pattern_to_the_agent_services(store, services, monkeypatch):
+    monkeypatch.setattr(remote, "settings", replace(remote.settings, adk_agent_url=services["adk"],
+                                                    crew_agent_url=services["crew"]))
+    services["seen"]["adk"].clear()
+    wf = run_ci_workflow("simple_bug", store, None, strategy=None).workflow_id
+    propose_fix(store, wf, AgenticStrategy(messaging="direct", transport="a2a", fallback=False, pattern="parallel"))
+    kind, payload = services["seen"]["adk"][-1]
+    assert kind == "analyse_and_plan" and payload["pattern"] == "parallel"

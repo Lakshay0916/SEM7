@@ -51,14 +51,15 @@ def get_predictor() -> RiskPredictor | None:
     return RiskPredictor.load() if MODEL_PATH.exists() else None
 
 
-def get_strategy(name: str | None = None, messaging: str | None = None) -> RepairStrategy:
-    return make_strategy(name, messaging)
+def get_strategy(name: str | None = None, messaging: str | None = None,
+                 pattern: str | None = None) -> RepairStrategy:
+    return make_strategy(name, messaging, pattern)
 
 
 def strategy_for(store: Store, wf_id: str) -> RepairStrategy:
     """The strategy a workflow was started with, so retries after reflection use the same one."""
     choice = store.latest(wf_id, "strategy_choice") or {}
-    return get_strategy(choice.get("strategy"), choice.get("messaging"))
+    return get_strategy(choice.get("strategy"), choice.get("messaging"), choice.get("pattern"))
 
 
 @lru_cache
@@ -91,6 +92,9 @@ class RunRequest(BaseModel):
         default=None, description="Who analyses failures: rule-based or ADK + CrewAI agents (default: server setting)")
     messaging: Literal["blackboard", "direct"] | None = Field(
         default=None, description="Agents only: share context via a blackboard or direct hand-off (default: server)")
+    pattern: Literal["sequential", "parallel", "hierarchical"] | None = Field(
+        default=None, description="Agents only: one after another, parallel investigators, or a lead agent that "
+                                  "delegates (default: server setting)")
 
 
 class Decision(BaseModel):
@@ -162,10 +166,12 @@ def run_workflow(req: RunRequest) -> dict:
         raise HTTPException(status_code=409, detail=f"{option['label']} unavailable: {option['reason']}")
     store = get_store()
     messaging = (req.messaging or settings.agent_messaging) if name == "agents" else None
+    pattern = (req.pattern or settings.agent_pattern) if name == "agents" else None
     result = run_ci_workflow(req.scenario, store, get_predictor(),
-                             strategy=get_strategy(name, messaging) if req.heal else None)
-    store.save_artifact(result.workflow_id, "strategy_choice", {"strategy": name, "messaging": messaging})
-    return {**_summary(store, result.workflow_id), "strategy": name, "messaging": messaging}
+                             strategy=get_strategy(name, messaging, pattern) if req.heal else None)
+    store.save_artifact(result.workflow_id, "strategy_choice",
+                        {"strategy": name, "messaging": messaging, "pattern": pattern})
+    return {**_summary(store, result.workflow_id), "strategy": name, "messaging": messaging, "pattern": pattern}
 
 
 @app.get("/workflows", tags=["workflows"])

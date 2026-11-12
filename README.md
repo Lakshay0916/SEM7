@@ -133,6 +133,23 @@ default stays `rules` (CI, Docker and the EC2 stack need no API key).
   time, content) is saved with the workflow and shown in the attempt's **Blackboard** panel.
   `AGENT_MESSAGING=direct` uses point-to-point hand-off instead (ADK session state, then CrewAI task context)
   for comparison.
+- **Agent patterns (`AGENT_PATTERN`), each using its framework's own construct:**
+
+  | Pattern | What changes | Framework construct |
+  |---|---|---|
+  | `sequential` (default) | Investigator → Root-cause → Planner → Reviewer, one after another | ADK `SequentialAgent`, CrewAI `Process.sequential` |
+  | `parallel` | Three specialist investigators run **at the same time** (failing tests, code change, risk + history); an Investigation Lead merges their findings (fan-out / fan-in). Each finding is posted to the blackboard | ADK `ParallelAgent` inside a `SequentialAgent` |
+  | `hierarchical` | A **Repair Lead** manager agent decides who does what and delegates drafting to the Planner and checking to the Reviewer; every delegation is recorded from CrewAI's event bus | CrewAI `Process.hierarchical` with a `manager_agent` |
+
+  Patterns combine with both messaging modes and both transports (the A2A services expose
+  `parallel_investigation` and `lead_plan` skills). Pick one per run on the Run Pipeline page or with
+  `"pattern"` in `POST /workflows`.
+
+  First live runs (scenario 3, blackboard, Gemini free tier; single runs, not a benchmark): sequential
+  plan in 49 s, parallel 50 s, hierarchical 38-313 s over four runs (2-4 delegations; the slow run waited out
+  the free tier's 15 requests/minute). All fixed the bug in one attempt and reached a PR. A hierarchical
+  crew makes many calls in a burst, so the lead is capped (`LEAD_MAX_ITER`) and rate-limit retries wait as
+  long as the API asks. The 40-run evaluation compares the patterns properly.
 - **MCP tools (`AGENT_TOOLS=1`):** two MCP servers (`app/mcp_servers/`), launched over stdio and scoped to the one
   repair, so tools never see other paths or databases:
 

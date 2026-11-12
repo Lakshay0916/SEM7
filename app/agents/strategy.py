@@ -9,6 +9,11 @@ How the agents share context (AGENT_MESSAGING):
 * direct - point-to-point hand-off: ADK session state inside a SequentialAgent, then CrewAI task
   context inside one crew. Kept for comparison with the blackboard.
 
+How the agents are organised (AGENT_PATTERN), in either messaging mode:
+* sequential (default) - Investigator -> Root-cause -> Planner -> Reviewer, one after another.
+* parallel     - three specialist investigators at once (ADK ParallelAgent), merged by an Investigation Lead.
+* hierarchical - a Repair Lead manager agent delegates drafting and review (CrewAI hierarchical process).
+
 The self-healing loop around it is unchanged: plans still go through the safety checks, human
 approval, the repair branch, real tests and reflection. If an agent step fails (API down, invalid
 output) and fallback is enabled, that step is done by the rule-based strategy and the event log
@@ -33,6 +38,7 @@ from app.models.schemas import InvestigationReport, RepairPlan, RootCauseReport
 Analysts = Callable[[str, list[AgentRecord]], tuple[InvestigationReport, RootCauseReport]]
 Planner = Callable[[str, InvestigationReport, RootCauseReport, RepairContext, list[AgentRecord]], PlanDraft]
 MESSAGING = ("blackboard", "direct")
+PATTERNS = ("sequential", "parallel", "hierarchical")
 
 
 # --------------------------------------------------------------------------- direct (point-to-point)
@@ -45,17 +51,17 @@ def scope_of(ctx: RepairContext) -> RepairScope | None:
     return RepairScope(ctx.repo_dir, ctx.failure.diff.base_sha, ctx.failure.commit_sha)
 
 
-def _default_analysts(evidence: str, records: list[AgentRecord], scope=None):
+def _default_analysts(evidence: str, records: list[AgentRecord], scope=None, pattern: str = "sequential"):
     from app.agents.adk_analysts import run_analysts
 
-    return run_analysts(evidence, settings.agent_model, records, scope)
+    return run_analysts(evidence, settings.agent_model, records, scope, pattern)
 
 
-def _default_planner(evidence, investigation, root_cause, ctx, records):
+def _default_planner(evidence, investigation, root_cause, ctx, records, pattern: str = "sequential"):
     from app.agents.crew_planner import run_planner
 
     review = run_planner(evidence, investigation, root_cause, ctx.repo_dir, settings.agent_model, records,
-                         scope_of(ctx))
+                         scope_of(ctx), pattern)
     if not review.approved:
         records.append(AgentRecord(agent="Code Reviewer", framework="crewai", status="ok",
                                    message="reviewer corrected the draft: " + "; ".join(review.issues)[:300]))
@@ -65,10 +71,13 @@ def _default_planner(evidence, investigation, root_cause, ctx, records):
 # --------------------------------------------------------------------------- blackboard
 
 
-def default_sources(model: str | None = None, scope: RepairScope | None = None) -> list[KnowledgeSource]:
-    """The four agents as blackboard knowledge sources (ADK analysts, CrewAI planner and reviewer).
+def default_sources(model: str | None = None, scope: RepairScope | None = None,
+                    pattern: str = "sequential") -> list[KnowledgeSource]:
+    """The agents as blackboard knowledge sources (ADK analysts, CrewAI planner and reviewer).
 
-    With a `scope`, each agent can call its MCP tools (see app/agents/mcp_tools.py)."""
+    The pattern decides which sources exist: `parallel` swaps the investigator for the parallel
+    investigation (its specialists' findings are posted too); `hierarchical` swaps planner + reviewer for
+    the Repair Lead's crew. With a `scope`, each agent can call its MCP tools (app/agents/mcp_tools.py)."""
     model = model or settings.agent_model
 
     def investigator(bb, records):
@@ -96,12 +105,51 @@ def default_sources(model: str | None = None, scope: RepairScope | None = None) 
         from app.agents.crew_planner import run_review_task
 
         review = run_review_task(bb.get("evidence"), json.dumps(bb.get("plan_draft")), model, records, scope)
-        verdict = "approved" if review.approved else "corrected: " + "; ".join(review.issues)
-        return review, f"{verdict} - {review.final_plan.summary}"
+        return review, review_summary(review)
 
-    return [
-        KnowledgeSource("investigator", "adk", ("evidence",), "investigation", investigator),
-        KnowledgeSource("root_cause_analyst", "adk", ("evidence", "investigation"), "root_cause", root_cause_analyst),
+    def parallel_investigation(bb, records):
+        from app.agents.adk_analysts import run_parallel_investigation
+
+        inv, findings = run_parallel_investigation(bb.get("evidence"), model, records, scope)
+        post_findings(bb, findings)
+        return inv, inv.failure_summary
+
+    def lead(bb, records):
+        from app.agents.crew_planner import run_hierarchical
+
+        review = run_hierarchical(bb.get("evidence"), bb.get("investigation")["failure_summary"],
+                                  json.dumps(bb.get("root_cause")), bb.get("feedback:review"), model, records, scope)
+        return review, review_summary(review)
+
+    return arrange(pattern, investigator, root_cause_analyst, planner, reviewer, parallel_investigation, lead)
+
+
+def post_findings(bb: Blackboard, findings: dict) -> None:
+    """The parallel specialists' findings go on the board too, so each angle stays visible and auditable."""
+    for name, f in findings.items():
+        f = f if isinstance(f, dict) else f.model_dump(mode="json")
+        bb.post(f"finding:{name}", f, author=name, framework="adk",
+                summary=f"{f.get('focus', name)}: " + "; ".join(f.get("facts", [])[:2])[:200])
+
+
+def review_summary(review: PlanReview) -> str:
+    return ("approved" if review.approved else "corrected: " + "; ".join(review.issues)) + \
+        f" - {review.final_plan.summary}"
+
+
+def arrange(pattern: str, investigator, root_cause_analyst, planner, reviewer, parallel_investigation,
+            lead) -> list[KnowledgeSource]:
+    """The knowledge sources for one pattern (shared by in-process and A2A agents)."""
+    if pattern not in PATTERNS:
+        raise ValueError(f"unknown AGENT_PATTERN {pattern!r} (use {', '.join(PATTERNS)})")
+    first = (KnowledgeSource("parallel investigators", "adk", ("evidence",), "investigation", parallel_investigation)
+             if pattern == "parallel" else
+             KnowledgeSource("investigator", "adk", ("evidence",), "investigation", investigator))
+    analysis = [first, KnowledgeSource("root_cause_analyst", "adk", ("evidence", "investigation"), "root_cause",
+                                       root_cause_analyst)]
+    if pattern == "hierarchical":
+        return analysis + [KnowledgeSource("Repair Lead", "crewai", ("evidence", "root_cause"), "review", lead)]
+    return analysis + [
         KnowledgeSource("Repair Planner", "crewai", ("evidence", "root_cause"), "plan_draft", planner),
         KnowledgeSource("Code Reviewer", "crewai", ("evidence", "root_cause", "plan_draft"), "review", reviewer),
     ]
@@ -124,8 +172,12 @@ class AgenticStrategy:
 
     def __init__(self, analysts: Analysts | None = None, planner: Planner | None = None,
                  fallback: bool | None = None, messaging: str | None = None,
-                 sources: list[KnowledgeSource] | None = None, transport: str | None = None) -> None:
+                 sources: list[KnowledgeSource] | None = None, transport: str | None = None,
+                 pattern: str | None = None) -> None:
         self.messaging = (messaging or settings.agent_messaging).lower()
+        self.pattern = (pattern or settings.agent_pattern).lower()
+        if self.pattern not in PATTERNS:
+            raise ValueError(f"unknown AGENT_PATTERN {self.pattern!r} (use {', '.join(PATTERNS)})")
         self.transport = (transport or settings.agent_transport).lower()
         if self.transport not in ("local", "a2a"):
             raise ValueError(f"unknown AGENT_TRANSPORT {self.transport!r} (use local or a2a)")
@@ -165,9 +217,9 @@ class AgenticStrategy:
         elif self.transport == "a2a":
             from app.a2a_agents.remote import remote_sources
 
-            sources = remote_sources(scope_of(ctx))
+            sources = remote_sources(scope_of(ctx), pattern=self.pattern)
         else:
-            sources = default_sources(scope=scope_of(ctx))
+            sources = default_sources(scope=scope_of(ctx), pattern=self.pattern)
         return BlackboardController(sources, plan_guards(ctx.repo_dir))
 
     # ------------------------------------------------------------------ interface
@@ -185,9 +237,9 @@ class AgenticStrategy:
                 rc = RootCauseReport.model_validate(bb.get("root_cause"))
             else:
                 if self.remote is not None:
-                    inv, rc = self.remote.analyse(evidence, self.records, scope_of(ctx), ctx.repo_dir)
+                    inv, rc = self.remote.analyse(evidence, self.records, scope_of(ctx), ctx.repo_dir, self.pattern)
                 elif self.analysts is _default_analysts:
-                    inv, rc = self.analysts(evidence, self.records, scope_of(ctx))
+                    inv, rc = self.analysts(evidence, self.records, scope_of(ctx), self.pattern)
                 else:
                     inv, rc = self.analysts(evidence, self.records)
         except Exception as exc:
@@ -220,6 +272,8 @@ class AgenticStrategy:
                 draft = review.final_plan
             elif self.remote is not None:
                 draft = self.remote.plan(ctx.repo_dir)  # the CrewAI service already planned during the hand-off
+            elif self.planner is _default_planner:
+                draft = self.planner(evidence, investigation, root_cause, ctx, self.records, self.pattern)
             else:
                 draft = self.planner(evidence, investigation, root_cause, ctx, self.records)
             problems = check_draft(draft, ctx.repo_dir)

@@ -24,6 +24,10 @@ SERVERS = {"sem7-risk": "app.mcp_servers.risk_server", "sem7-ci": "app.mcp_serve
 
 AGENT_TOOLS: dict[str, dict[str, list[str]]] = {
     "investigator": {"sem7-risk": ["score_change_risk"], "sem7-ci": ["past_failures"]},
+    # parallel pattern: each specialist gets the tools for its own angle
+    "test_analyst": {"sem7-ci": ["read_source"]},
+    "change_analyst": {"sem7-ci": ["read_source"]},
+    "history_analyst": {"sem7-risk": ["score_change_risk"], "sem7-ci": ["past_failures"]},
     "root_cause_analyst": {"sem7-ci": ["read_source"]},
     "Repair Planner": {"sem7-ci": ["read_source", "run_tests_with_patch"]},
     "Code Reviewer": {"sem7-ci": ["run_tests_with_patch"]},
@@ -33,6 +37,13 @@ TOOL_HINTS = {
     "investigator": "\n\nTOOLS: call `score_change_risk` once to get the ML risk of the commit, and `past_failures` "
                     "with the changed function's name to find similar earlier failures. Report what they return as "
                     "FACT lines (e.g. \"FACT (risk model): HIGH, score 0.58\"). Do not invent tool results.",
+    "test_analyst": "\n\nTOOLS: use `read_source` to read a failing test, or the function it calls, when the evidence "
+                    "does not show enough of it.",
+    "change_analyst": "\n\nTOOLS: use `read_source` (version=baseline and version=current, with the function name) "
+                      "to compare each changed function before and after the commit.",
+    "history_analyst": "\n\nTOOLS: call `score_change_risk` once for the ML risk of the commit, and `past_failures` "
+                       "with the changed function's name. Report what they return as FACT lines; do not invent "
+                       "tool results.",
     "root_cause_analyst": "\n\nTOOLS: use `read_source` (version=baseline and version=current, with the function "
                           "name) to compare the suspect function before and after the commit.",
     "Repair Planner": "\n\nTOOLS: you MUST call `run_tests_with_patch` (file, function, complete new source) at least "
@@ -135,21 +146,50 @@ def crew_mcps(agent: str, scope: RepairScope | None) -> list:
 
 @contextmanager
 def crew_tool_events(records: list[AgentRecord], role: str = "crew"):
-    """Record every MCP tool call CrewAI agents make (from CrewAI's event bus) while the block runs."""
+    """Record every MCP tool call CrewAI agents make, and every delegation a manager agent makes
+    (both from CrewAI's event bus), while the block runs."""
     from crewai.events.event_bus import crewai_event_bus
     from crewai.events.types.mcp_events import MCPToolExecutionCompletedEvent, MCPToolExecutionFailedEvent
+    from crewai.events.types.tool_usage_events import ToolUsageFinishedEvent, ToolUsageStartedEvent
+
+    from app.agents.crew_planner import DELEGATION_TOOLS
+
+    working: list[str] = []  # coworkers doing delegated work right now (CrewAI reports the manager as the caller)
+
+    def is_delegation(event) -> bool:
+        return (event.tool_name or "").lower().replace(" ", "_") in DELEGATION_TOOLS
 
     def done(source, event):
         failed = isinstance(event, MCPToolExecutionFailedEvent)
         result = event.error if failed else event.result
+        caller = working[-1] if working else event.agent_role or getattr(event.from_agent, "role", None) or role
         records.append(AgentRecord(
-            agent=f"{event.agent_role or getattr(event.from_agent, 'role', None) or role} → {event.tool_name}",
-            framework="mcp",
+            agent=f"{caller} → {event.tool_name}", framework="mcp",
             status="error" if failed or _is_error(result) else "ok",
             seconds=round((getattr(event, "execution_duration_ms", None) or 0) / 1000, 2),
             message=f"args={_summarise(event.tool_args or {}, 120)} result={_summarise(result)}"))
 
-    handlers = [(MCPToolExecutionCompletedEvent, done), (MCPToolExecutionFailedEvent, done)]
+    def delegation_started(source, event):
+        if is_delegation(event):
+            args = event.tool_args if isinstance(event.tool_args, dict) else {}
+            working.append(args.get("coworker", "coworker"))
+
+    def delegated(source, event):
+        if not is_delegation(event):
+            return
+        if working:
+            working.pop()
+        args = event.tool_args if isinstance(event.tool_args, dict) else {}
+        took = (event.finished_at - event.started_at).total_seconds() if event.finished_at and event.started_at else 0
+        verb = "delegated" if event.tool_name.lower().startswith("delegate") else "asked"
+        records.append(AgentRecord(
+            agent=f"{event.agent_role or role} → {args.get('coworker', 'coworker')}", framework="crewai",
+            status="ok", seconds=round(took, 2),
+            message=f"{verb}: {_summarise(args.get('task') or args.get('question') or '', 110)} "
+                    f"→ got: {_summarise(getattr(event, 'output', '') or '', 110)}"))
+
+    handlers = [(MCPToolExecutionCompletedEvent, done), (MCPToolExecutionFailedEvent, done),
+                (ToolUsageStartedEvent, delegation_started), (ToolUsageFinishedEvent, delegated)]
     for event_type, handler in handlers:
         crewai_event_bus.register_handler(event_type, handler)
     try:

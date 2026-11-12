@@ -185,3 +185,21 @@ def test_transient_errors_are_retried_and_recorded():
     assert not is_transient(ValueError("bad schema"))
     with pytest.raises(ValueError):
         with_retries(lambda: (_ for _ in ()).throw(ValueError("bad schema")), "a", "adk", [], sleep=lambda s: None)
+
+
+def test_rate_limit_retry_waits_as_long_as_the_api_asks():
+    from app.agents.retry import retry_after
+
+    calls, waits = [], []
+
+    def limited():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("429 RESOURCE_EXHAUSTED ... Please retry in 22.35s.")
+        return "ok"
+
+    assert with_retries(limited, "a", "adk", [], sleep=waits.append) == "ok"
+    assert waits == [pytest.approx(23.35)]                         # not the default 3 s
+    assert retry_after(RuntimeError("{'retryDelay': '7s'}")) == 7.0
+    assert retry_after(RuntimeError("retry in 9999s")) == 90.0      # capped
+    assert retry_after(RuntimeError("503 overloaded")) is None

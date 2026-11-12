@@ -6,7 +6,8 @@ from app.config import settings
 from app.healing.strategy import RepairStrategy
 
 
-def make_strategy(name: str | None = None, messaging: str | None = None) -> RepairStrategy:
+def make_strategy(name: str | None = None, messaging: str | None = None,
+                  pattern: str | None = None) -> RepairStrategy:
     name = (name or settings.repair_strategy).lower()
     if name in ("rules", "rule-based"):
         from app.healing.rules import RuleBasedStrategy
@@ -18,7 +19,7 @@ def make_strategy(name: str | None = None, messaging: str | None = None) -> Repa
         except ImportError as exc:  # frameworks live in requirements-agents.txt, not the base image
             raise RuntimeError(f"REPAIR_STRATEGY=agents needs the agent packages "
                                f"(pip install -r requirements-agents.txt): {exc}") from exc
-        return AgenticStrategy(messaging=messaging)
+        return AgenticStrategy(messaging=messaging, pattern=pattern)
     raise ValueError(f"unknown REPAIR_STRATEGY {name!r} (use 'rules' or 'agents')")
 
 
@@ -56,5 +57,8 @@ def strategy_options() -> list[dict]:
          "messaging": [{"id": "blackboard", "label": "Blackboard (shared state)",
                         "default": settings.agent_messaging == "blackboard"},
                        {"id": "direct", "label": "Direct hand-off (point-to-point)",
-                        "default": settings.agent_messaging == "direct"}]},
+                        "default": settings.agent_messaging == "direct"}],
+         "patterns": [{"id": p, "label": label, "default": settings.agent_pattern == p}
+                      for p, label in (("sequential", "Sequential"), ("parallel", "Parallel investigators"),
+                                       ("hierarchical", "Hierarchical (lead delegates)"))]},
     ]

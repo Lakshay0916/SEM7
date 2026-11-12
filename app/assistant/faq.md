@@ -289,11 +289,24 @@ workflow's event log; transient Gemini errors are retried, and if a step still f
 strategy does that step and the log says so. Model: `gemini-3.1-flash-lite` (setting `AGENT_MODEL`). In
 live tests the agents fixed scenario 1 and scenario 3 in one attempt each (rules need two for scenario 3).
 
+## Which agent patterns are there? Sequential, parallel and hierarchical
+The agents can be organised in three patterns, chosen per run on the Run Pipeline page (or with
+`"pattern"` in `POST /workflows`, or `AGENT_PATTERN`). Sequential (default): Investigator, Root-cause
+analyst, Repair Planner, Code Reviewer, one after another (ADK SequentialAgent, CrewAI sequential
+process). Parallel: three specialist investigators run at the same time in an ADK ParallelAgent - one
+looks at the failing tests, one at the code change, one at risk and history (ML risk score and past
+failures) - and an Investigation Lead merges their findings (fan-out / fan-in); each finding is posted to
+the blackboard. Hierarchical: a CrewAI hierarchical crew where a Repair Lead manager agent decides who
+does what and delegates drafting to the Repair Planner and checking to the Code Reviewer; every
+delegation is recorded. All three work with the blackboard or direct hand-off, locally or over A2A, and
+go through the same guardrails, human approval and real tests.
+
 ## What is planned next?
 Already built for Agentic AI: the ADK + CrewAI agents, the blackboard (and direct hand-off), MCP tools,
-A2A agent services, and cloud deployment of everything on AWS EC2. Still to come for Agentic AI:
-hierarchical and parallel agent patterns with a comparison, prompt-injection and toxicity guardrails
-tested with personas, a per-agent heat map and tracing, and a 40-run evaluation with boxplots.
+A2A agent services, sequential / parallel / hierarchical agent patterns, and cloud deployment of
+everything on AWS EC2. Still to come for Agentic AI: prompt-injection and toxicity guardrails tested
+with personas, a per-agent heat map and tracing, and a 40-run evaluation with boxplots that also
+compares the patterns.
 After that, for DevOps: Terraform for infrastructure as code, automatic deployment (CD) from GitHub
 Actions, monitoring dashboards, and a real GitHub PR adapter.
 

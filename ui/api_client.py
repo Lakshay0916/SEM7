@@ -44,9 +44,9 @@ class ApiClient:
 
     # workflows
     def run(self, scenario: str, heal: bool = True, strategy: str | None = None,
-            messaging: str | None = None) -> dict:
+            messaging: str | None = None, pattern: str | None = None) -> dict:
         return self._req("POST", "/workflows", {"scenario": scenario, "heal": heal, "strategy": strategy,
-                                                "messaging": messaging})
+                                                "messaging": messaging, "pattern": pattern})
 
     def workflows(self, limit: int = 200) -> list[dict]: return self._req("GET", f"/workflows?limit={limit}")
     def trace(self, wf_id: str) -> dict: return self._req("GET", f"/workflows/{wf_id}")

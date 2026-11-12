@@ -5,7 +5,8 @@
 Skills:
     plan             evidence + root cause (+ guardrail feedback) -> PlanDraft
     review           evidence + draft -> PlanReview
-    plan_and_review  direct hand-off target: the sequential crew (planner -> reviewer with task context)
+    lead_plan        hierarchical pattern: the Repair Lead delegates to the planner and the reviewer -> PlanReview
+    plan_and_review  direct hand-off target: the crew in the requested pattern (sequential or hierarchical)
 """
 
 from __future__ import annotations
@@ -51,21 +52,35 @@ def review(payload: dict) -> dict:
     return _out(result, records)
 
 
+def lead_plan(payload: dict) -> dict:
+    from app.agents.crew_planner import run_hierarchical
+
+    records: list[AgentRecord] = []
+    result = run_hierarchical(payload["evidence"], payload["investigation_summary"], payload["root_cause"],
+                              payload.get("feedback"), payload.get("model") or settings.agent_model, records,
+                              _scope(payload))
+    return _out(result, records)
+
+
 def plan_and_review(payload: dict) -> dict:
     from app.agents.crew_planner import run_planner
 
     records: list[AgentRecord] = []
+    pattern = payload.get("pattern") or "sequential"
     result = run_planner(payload["evidence"], InvestigationReport.model_validate(payload["investigation"]),
                          RootCauseReport.model_validate(payload["root_cause"]), Path(payload["repo_dir"]),
-                         payload.get("model") or settings.agent_model, records, _scope(payload))
+                         payload.get("model") or settings.agent_model, records, _scope(payload),
+                         "hierarchical" if pattern == "hierarchical" else "sequential")
     return _out(result, records)
 
 
-SKILLS = {"plan": plan, "review": review, "plan_and_review": plan_and_review}
+SKILLS = {"plan": plan, "review": review, "lead_plan": lead_plan, "plan_and_review": plan_and_review}
 CARD = agent_card(
     "sem7-crewai-planning", "CrewAI agents that plan a minimal fix and review it.",
     [("plan", "Repair Planner", "Smallest source-code change that makes the failing tests pass"),
      ("review", "Code Reviewer", "Approves the draft or returns a corrected plan"),
+     ("lead_plan", "Repair Lead (hierarchical crew)",
+      "A manager agent delegates drafting to the planner and review to the reviewer"),
      ("plan_and_review", "Plan and review (crew)", "Planner -> reviewer as one sequential crew")],
     public_url(PORT))
 app = build_app(CARD, SKILLS)

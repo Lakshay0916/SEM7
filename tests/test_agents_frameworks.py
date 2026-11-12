@@ -200,3 +200,115 @@ def test_adk_agent_calls_an_mcp_tool_and_the_call_is_recorded(mcp_scope):
     assert tool_calls[0].status == "ok" and '"risk_level"' in tool_calls[0].message
     tools_offered = {d.name for t in model.requests[0].config.tools for d in (t.function_declarations or [])}
     assert {"score_change_risk", "past_failures"} <= tools_offered and "read_source" not in tools_offered
+
+
+# --------------------------------------------------------------------------- patterns (parallel, hierarchical)
+
+
+class ParallelGemini(FakeGemini):
+    """Specialists answer slowly with a finding (so overlap is measurable); lead and root cause as before."""
+
+    active: int = 0
+    peak: int = 0
+
+    async def generate_content_async(self, llm_request, stream=False):
+        import asyncio
+
+        instruction = str(llm_request.config.system_instruction)
+        if "investigators examining the same CI failure in parallel" not in instruction:
+            async for r in super().generate_content_async(llm_request, stream):
+                yield r
+            return
+        self.requests.append(llm_request)
+        focus = instruction.split('Set `focus` to "')[1].split('"')[0]
+        self.active += 1
+        self.peak = max(self.peak, self.active)
+        await asyncio.sleep(0.2)
+        self.active -= 1
+        finding = {"focus": focus, "facts": [f"FACT: seen from {focus}"], "hypotheses": [],
+                   "suspect_functions": ["src/calculator.py::add"]}
+        yield LlmResponse(content=types.Content(role="model", parts=[types.Part(text=json.dumps(finding))]),
+                          usage_metadata=types.GenerateContentResponseUsageMetadata(
+                              prompt_token_count=50, candidates_token_count=10, total_token_count=60))
+
+
+def test_parallel_pattern_runs_three_specialists_at_once_then_merges():
+    model = ParallelGemini()
+    model.requests.clear()
+    records = []
+    inv, rc = run_analysts("EVIDENCE: test_add fails, diff shows return a - b", model, records, pattern="parallel")
+    assert isinstance(inv, InvestigationReport) and rc.root_cause == "add() uses - instead of +"
+    assert model.peak == 3                                   # the ADK ParallelAgent really overlapped all three
+    assert sorted(r.agent for r in records[:3]) == ["change_analyst", "history_analyst", "test_analyst"]
+    assert [r.agent for r in records[3:]] == ["investigation_lead", "root_cause_analyst"]
+    assert all("parallel branch" in r.message for r in records[:3])
+    lead = next(str(r.config.system_instruction) for r in model.requests
+                if "Investigation Lead" in str(r.config.system_instruction))
+    for focus in ("failing tests", "code change", "risk and history"):  # fan-in: lead saw every specialist
+        assert f"seen from {focus}" in lead
+
+
+def test_parallel_pattern_on_the_blackboard_posts_each_specialists_finding():
+    import app.agents.strategy as strat
+    from app.agents.blackboard import Blackboard, BlackboardController
+
+    model = ParallelGemini()
+    sources = strat.default_sources(model=model, pattern="parallel")
+    bb, records = Blackboard(), []
+    bb.post("evidence", "EVIDENCE: test_add fails", "orchestrator", "system")
+    BlackboardController(sources).run_until(bb, "root_cause", records)
+    keys = [e.key for e in bb.entries]
+    assert keys[0] == "evidence" and keys[-2:] == ["investigation", "root_cause"]
+    assert sorted(keys[1:4]) == ["finding:change_analyst", "finding:history_analyst", "finding:test_analyst"]
+    assert bb.get("finding:change_analyst")["focus"] == "code change"
+
+
+class HierarchicalCrewLLM(BaseLLM):
+    """Repair Lead delegates drafting then review, then answers; its first answer edits a test (guardrail)."""
+
+    calls: list = []
+
+    def call(self, messages, tools=None, callbacks=None, available_functions=None, from_task=None,
+             from_agent=None, response_model=None):
+        text = json.dumps(messages) if not isinstance(messages, str) else messages
+        role = getattr(from_agent, "role", "")
+        self.calls.append((role, text))
+        draft = {"summary": "Restore addition", "root_cause": "add() uses -",
+                 "edits": [{"file": "src/calculator.py", "function": "add", "new_source": GOOD_ADD,
+                            "description": "use + again"}]}
+        if role == "Repair Planner":
+            return "Thought: I have the fix\nFinal Answer: " + json.dumps(draft)
+        if role == "Code Reviewer":
+            return "Thought: checked\nFinal Answer: approved, the draft restores +"
+        mine = [c for r, c in self.calls if r == "Repair Lead"]
+        if "Fix these problems" in text:
+            return "Thought: fixed\nFinal Answer: " + json.dumps({"approved": True, "issues": [], "final_plan": draft})
+        if len(mine) == 1:
+            return ('Thought: the planner drafts\nAction: Delegate work to coworker\nAction Input: '
+                    '{"task": "Draft the fix", "context": "add() uses -", "coworker": "Repair Planner"}')
+        if len(mine) == 2:
+            return ('Thought: the reviewer checks\nAction: Delegate work to coworker\nAction Input: '
+                    '{"task": "Review the draft", "context": "restore +", "coworker": "Code Reviewer"}')
+        bad = {**draft, "edits": [{**draft["edits"][0], "file": "tests/test_calculator.py"}]}
+        return "Thought: done\nFinal Answer: " + json.dumps({"approved": True, "issues": [], "final_plan": bad})
+
+
+def test_hierarchical_pattern_lead_delegates_and_its_plan_is_guarded(tmp_path, monkeypatch):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src" / "calculator.py").write_text('def add(a, b):\n    """Return the sum of a and b."""\n'
+                                                    "    return a - b\n")
+    (tmp_path / "tests" / "test_calculator.py").write_text("def test_add():\n    assert True\n")
+    llm = HierarchicalCrewLLM(model="fake-crew")
+    llm.calls.clear()
+    monkeypatch.setattr("app.agents.crew_planner._llm", lambda _: (llm, "fake-crew"))
+    records = []
+    review = run_planner("EVIDENCE", InvestigationReport(**INVESTIGATION), RootCauseReport(**ROOT_CAUSE),
+                         tmp_path, "gemini", records, pattern="hierarchical")
+    assert review.approved and review.final_plan.edits[0].file == "src/calculator.py"  # guardrail forced a retry
+    roles = [r for r, _ in llm.calls]
+    assert roles[:4] == ["Repair Lead", "Repair Planner", "Repair Lead", "Code Reviewer"]  # lead decides the order
+    assert "Delegate a specific task" in llm.calls[0][1]               # CrewAI gave the lead its delegation tools
+    delegations = [r.agent for r in records if " → " in r.agent]
+    assert delegations[:2] == ["Repair Lead → Repair Planner", "Repair Lead → Code Reviewer"]
+    assert records[-1].agent == "Repair Lead" and "2 delegation(s)" in records[-1].message

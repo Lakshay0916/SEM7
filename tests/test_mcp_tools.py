@@ -82,7 +82,9 @@ def test_past_failures_searches_the_workflow_database(scope):
 
 
 def test_every_agent_has_tools_and_a_hint_only_when_scoped(scope):
-    assert set(mcp_tools.AGENT_TOOLS) == {"investigator", "root_cause_analyst", "Repair Planner", "Code Reviewer"}
+    assert set(mcp_tools.AGENT_TOOLS) == {"investigator", "root_cause_analyst", "Repair Planner", "Code Reviewer",
+                                          "test_analyst", "change_analyst", "history_analyst"}
+    assert all(mcp_tools.hint(a, scope) for a in mcp_tools.AGENT_TOOLS)  # every tool-using agent is told how
     assert mcp_tools.hint("Repair Planner", None) == "" and "run_tests_with_patch" in mcp_tools.hint("Repair Planner", scope)
     env = mcp_tools.server_env(scope)
     assert env["SEM7_REPO_DIR"] == str(scope.repo_dir) and "PYTHONPATH" in env

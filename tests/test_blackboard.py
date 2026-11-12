@@ -184,3 +184,52 @@ def test_failed_agent_falls_back_and_the_board_says_who_did_it(store):
 def test_unknown_messaging_is_rejected():
     with pytest.raises(ValueError, match="AGENT_MESSAGING"):
         AgenticStrategy(messaging="carrier-pigeon")
+
+
+# --------------------------------------------------------------------------- patterns
+
+
+def test_each_pattern_puts_different_agents_on_the_board():
+    from app.agents.strategy import arrange
+
+    stubs = [lambda bb, records: None] * 6
+    shape = {p: [(ks.name, ks.produces) for ks in arrange(p, *stubs)] for p in ("sequential", "parallel",
+                                                                                 "hierarchical")}
+    assert shape["sequential"] == [("investigator", "investigation"), ("root_cause_analyst", "root_cause"),
+                                   ("Repair Planner", "plan_draft"), ("Code Reviewer", "review")]
+    assert shape["parallel"][0] == ("parallel investigators", "investigation")  # fan-out replaces the investigator
+    assert shape["parallel"][1:] == shape["sequential"][1:]
+    assert shape["hierarchical"] == shape["sequential"][:2] + [("Repair Lead", "review")]  # lead owns planning
+    with pytest.raises(ValueError, match="AGENT_PATTERN"):
+        arrange("committee", *stubs)
+
+
+def test_unknown_pattern_is_rejected():
+    with pytest.raises(ValueError, match="AGENT_PATTERN"):
+        AgenticStrategy(pattern="committee")
+
+
+def test_hierarchical_lead_gets_the_boards_feedback_when_its_plan_is_rejected(tmp_path):
+    from app.agents.strategy import arrange, plan_guards
+
+    for d in ("src", "tests"):
+        (tmp_path / d).mkdir()
+    (tmp_path / "src" / "calculator.py").write_text("def add(a, b):\n    return a - b\n")
+    (tmp_path / "tests" / "test_calculator.py").write_text("def add(a, b):\n    return 0\n")
+    seen = []
+
+    def lead(bb, records):
+        seen.append(bb.get("feedback:review"))
+        edit = FunctionEdit(file="tests/test_calculator.py" if len(seen) == 1 else "src/calculator.py",
+                            function="add", new_source="def add(a, b):\n    return a + b\n", description="d")
+        return PlanReview(approved=True, final_plan=PlanDraft(summary="s", root_cause="r", edits=[edit])), "done"
+
+    def stub(value):
+        return lambda bb, records: (value, "done")
+
+    sources = arrange("hierarchical", stub("inv"), stub("rc"), None, None, None, lead)
+    bb = Blackboard()
+    bb.post("evidence", "E", "orchestrator", "system")
+    review = BlackboardController(sources, plan_guards(tmp_path)).run_until(bb, "review", [])
+    assert review["final_plan"]["edits"][0]["file"] == "src/calculator.py"
+    assert seen[0] is None and "not tests" in seen[1][0]  # the retry saw why its first plan was retracted

@@ -88,6 +88,8 @@ def test_strategies_endpoint_reports_availability(client):
     opts = {o["id"]: o for o in client.get("/strategies").json()}
     assert opts["rules"]["available"] and opts["rules"]["default"]
     assert set(opts) == {"rules", "agents"} and "model" in opts["agents"]
+    patterns = {p["id"]: p for p in opts["agents"]["patterns"]}
+    assert set(patterns) == {"sequential", "parallel", "hierarchical"} and patterns["sequential"]["default"]
 
 
 def test_unavailable_agents_are_refused_not_faked(client, monkeypatch):
@@ -122,18 +124,22 @@ def test_workflow_keeps_the_strategy_it_started_with(client, monkeypatch):
     monkeypatch.setattr(api, "strategy_options", lambda: [
         {"id": "rules", "label": "Rule-based", "available": True, "reason": "", "default": True},
         {"id": "agents", "label": "AI agents", "available": True, "reason": "", "default": False}])
-    monkeypatch.setattr(api, "get_strategy", lambda name=None, messaging=None: made.append((name, messaging)) or (
+    monkeypatch.setattr(api, "get_strategy", lambda name=None, messaging=None, pattern=None: made.append(
+        (name, messaging, pattern)) or (
         FakeAgents(analysts=analysts, planner=planner, fallback=False, messaging="direct") if name == "agents"
         else RuleBasedStrategy()))
 
-    r = client.post("/workflows", json={"scenario": "simple_bug", "strategy": "agents", "messaging": "direct"})
+    r = client.post("/workflows", json={"scenario": "simple_bug", "strategy": "agents", "messaging": "direct",
+                                        "pattern": "parallel"})
     assert r.status_code == 201 and r.json()["strategy"] == "agents" and r.json()["messaging"] == "direct"
+    assert r.json()["pattern"] == "parallel"
     wf = r.json()["workflow_id"]
     trace = client.get(f"/workflows/{wf}").json()
     plan = next(a["payload"] for a in trace["artifacts"] if a["kind"] == "repair_plan")
     assert plan["strategy"] == "adk+crewai"
     assert client.post(f"/workflows/{wf}/approve", json={"reviewer": "alice"}).json()["state"] == "PR_CREATED"
-    assert made == [("agents", "direct"), ("agents", "direct")]  # approve re-used the workflow's own strategy
+    # approve re-used the workflow's own strategy, messaging and pattern
+    assert made == [("agents", "direct", "parallel"), ("agents", "direct", "parallel")]
 
     rules_run = client.post("/workflows", json={"scenario": "simple_bug", "strategy": "rules"}).json()
     plan = next(a["payload"] for a in client.get(f"/workflows/{rules_run['workflow_id']}").json()["artifacts"]

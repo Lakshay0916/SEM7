@@ -5,8 +5,9 @@
 Skills:
     investigator        evidence -> InvestigationReport
     root_cause_analyst  evidence + investigation -> RootCauseReport
-    analyse_and_plan    direct hand-off: runs both ADK agents, then sends the root cause to the CrewAI
-                        planning service over A2A and returns its reviewed plan (ADK -> CrewAI via A2A)
+    parallel_investigation  evidence -> three specialists in parallel + lead -> InvestigationReport + findings
+    analyse_and_plan    direct hand-off: runs the ADK agents (in the requested pattern), then sends the root
+                        cause to the CrewAI planning service over A2A and returns its reviewed plan
 """
 
 from __future__ import annotations
@@ -54,12 +55,24 @@ def root_cause_analyst(payload: dict) -> dict:
     return _out(rc, records)
 
 
+def parallel_investigation(payload: dict) -> dict:
+    from app.agents.adk_analysts import run_parallel_investigation
+
+    records: list[AgentRecord] = []
+    inv, findings = run_parallel_investigation(payload["evidence"], payload.get("model") or settings.agent_model,
+                                               records, _scope(payload))
+    return {"result": {"investigation": inv.model_dump(mode="json"),
+                       "findings": {n: f.model_dump(mode="json") for n, f in findings.items()}},
+            "records": [r.model_dump() for r in records]}
+
+
 def analyse_and_plan(payload: dict) -> dict:
     from app.agents.adk_analysts import run_analysts
 
     records: list[AgentRecord] = []
+    pattern = payload.get("pattern") or "sequential"
     inv, rc = run_analysts(payload["evidence"], payload.get("model") or settings.agent_model, records,
-                           _scope(payload))
+                           _scope(payload), "parallel" if pattern == "parallel" else "sequential")
     # Hand-off to the CrewAI agents: an A2A call from this (ADK) agent service to the CrewAI service.
     start = time.monotonic()
     crew = call_skill(payload.get("crew_url") or CREW_URL, "plan_and_review",
@@ -73,11 +86,14 @@ def analyse_and_plan(payload: dict) -> dict:
             "records": [r.model_dump() for r in records]}
 
 
-SKILLS = {"investigator": investigator, "root_cause_analyst": root_cause_analyst, "analyse_and_plan": analyse_and_plan}
+SKILLS = {"investigator": investigator, "root_cause_analyst": root_cause_analyst,
+          "parallel_investigation": parallel_investigation, "analyse_and_plan": analyse_and_plan}
 CARD = agent_card(
     "sem7-adk-analysts", "Google ADK agents that investigate a CI failure and find its root cause.",
     [("investigator", "Investigator", "What failed: facts vs hypotheses, from the evidence package"),
      ("root_cause_analyst", "Root-cause analyst", "Why it failed, with confidence and alternatives"),
+     ("parallel_investigation", "Parallel investigation",
+      "Three specialist investigators at once (tests, change, risk and history), merged by a lead"),
      ("analyse_and_plan", "Analyse and plan (direct hand-off)",
       "Both ADK agents, then hands the root cause to the CrewAI planning agents over A2A")],
     public_url(PORT))

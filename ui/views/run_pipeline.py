@@ -31,9 +31,22 @@ MESSAGING_HELP = {
               "CrewAI task context). No shared board - kept to compare against the blackboard.",
 }
 
+PATTERN_HELP = {
+    "sequential": "One agent after another: Investigator → Root-cause analyst → Repair Planner → Code Reviewer.",
+    "parallel": "Three specialist investigators work **at the same time** (ADK `ParallelAgent`): failing tests, the "
+                "code change, and risk + history. An Investigation Lead merges their findings, then the rest runs "
+                "as usual.",
+    "hierarchical": "A **Repair Lead** manager agent (CrewAI hierarchical crew) decides who does what: it delegates "
+                    "drafting to the Repair Planner and checking to the Code Reviewer, then returns the reviewed "
+                    "plan.",
+}
+PATTERN_ICON = {"sequential": "➡️ ", "parallel": "🔀 ", "hierarchical": "🧑‍💼 "}
 
-def _strategy_picker(api) -> tuple[str, str | None, bool]:
-    """Rule-based vs AI-agent analysis (+ how agents share context). Returns (strategy, messaging, can run)."""
+
+def _strategy_picker(api) -> tuple[str, str | None, str | None, bool]:
+    """Rule-based vs AI-agent analysis (+ how agents share context and are organised).
+
+    Returns (strategy, messaging, pattern, can run)."""
     options = {o["id"]: o for o in api.strategies()}
     default = next((o["id"] for o in options.values() if o["default"]), "rules")
     choice = st.segmented_control(
@@ -51,7 +64,14 @@ def _strategy_picker(api) -> tuple[str, str | None, bool]:
                              index=next((i for i, m in enumerate(modes.values()) if m["default"]), 0),
                              format_func=lambda m: ("🧩 " if m == "blackboard" else "🔗 ") + modes[m]["label"])
         st.caption(MESSAGING_HELP[messaging])
-    return choice, messaging, opt["available"]
+    pattern = None
+    if choice == "agents" and opt["available"] and opt.get("patterns"):
+        patterns = {p["id"]: p for p in opt["patterns"]}
+        pattern = st.radio("How are the agents organised?", list(patterns), horizontal=True, key="pattern",
+                           index=next((i for i, p in enumerate(patterns.values()) if p["default"]), 0),
+                           format_func=lambda p: PATTERN_ICON.get(p, "") + patterns[p]["label"])
+        st.caption(PATTERN_HELP[pattern])
+    return choice, messaging, pattern, opt["available"]
 
 
 def render() -> None:
@@ -86,13 +106,13 @@ def render() -> None:
                     else:
                         st.code(e["new"], language="python")
 
-    strategy, messaging, ready = _strategy_picker(api)
+    strategy, messaging, pattern, ready = _strategy_picker(api)
     if st.button("3. ▶️ Run the pipeline", type="primary", width="stretch", disabled=not ready):
         label = "AI agents are analysing the failure (about 20-40 s)…" if strategy == "agents" else \
             "Backend is running the pipeline…"
         with st.status(label, expanded=True) as status:
             try:
-                res = api.run(scenario_id, strategy=strategy, messaging=messaging)
+                res = api.run(scenario_id, strategy=strategy, messaging=messaging, pattern=pattern)
             except APIError as exc:
                 status.update(label=f"Failed: {exc.detail}", state="error")
                 st.stop()

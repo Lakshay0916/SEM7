@@ -129,6 +129,7 @@ def _attempt_block(tv: TraceView, n: int) -> None:
                        if refl["regressions"] else ""))
 
 
+PATTERN_LABEL = {"sequential": "➡️ sequential", "parallel": "🔀 parallel", "hierarchical": "🧑‍💼 hierarchical"}
 FRAMEWORK_ICON = {"system": "⚙️", "adk": "🔷", "crewai": "🟧", "mcp": "🔧", "a2a": "📡", "guardrail": "🛡️",
                   "rule-based": "📏"}
 
@@ -141,7 +142,8 @@ def _blackboard(board: list[dict]) -> None:
                      + (f", {calls} MCP tool calls" if calls else "") + " (shared state)", expanded=False):
         st.caption("Agents never call each other: each read its inputs from this board and posted its result here; "
                    "the controller picked who ran next. 🔧 posts are MCP tool calls an agent made while working; 📡 posts are "
-                   "A2A messages to the agent services. Struck-through posts were rejected by a guardrail and "
+                   "A2A messages to the agent services. `finding:` posts come from the parallel specialist "
+                   "investigators. Struck-through posts were rejected by a guardrail and "
                    "retracted - the agent then retried with the feedback posted after it.")
         for e in board:
             icon = FRAMEWORK_ICON.get(e["framework"], "•")
@@ -166,6 +168,11 @@ def _healing(api: ApiClient, tv: TraceView, wf_id: str) -> None:
     with st.container(border=True, key=f"step-{status}-6"):
         s = STEPS["heal"]
         step_header(6, s["title"], status, label, s["what"], s["why"])
+        choice = tv.latest("strategy_choice") or {}
+        if choice.get("strategy") == "agents":
+            st.caption(f"🤖 AI agents · {PATTERN_LABEL.get(choice.get('pattern') or 'sequential', '')} pattern · "
+                       f"{'blackboard' if (choice.get('messaging') or 'blackboard') == 'blackboard' else 'direct hand-off'}"
+                       " messaging")
 
         if state == S.FAILED and not attempts:
             st.write("No analysis yet for this failure.")

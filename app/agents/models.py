@@ -26,6 +26,16 @@ class PlanDraft(BaseModel):
     risks: list[str] = Field(default_factory=list, description="What could go wrong with this fix")
 
 
+class SpecialistFinding(BaseModel):
+    """What one parallel investigator found, looking at the failure from its own angle."""
+
+    focus: str = Field(description="The angle this specialist looked from, e.g. failing tests")
+    facts: list[str] = Field(default_factory=list, description='Facts from the evidence, each prefixed "FACT:"')
+    hypotheses: list[str] = Field(default_factory=list, description='Guesses, each prefixed "HYPOTHESIS:"')
+    suspect_functions: list[str] = Field(default_factory=list,
+                                         description="Source functions this angle points to, as file::function")
+
+
 class PlanReview(BaseModel):
     approved: bool = Field(description="True if the draft is minimal, grounded in the evidence and complete")
     issues: list[str] = Field(default_factory=list, description="Problems found in the draft (empty if none)")

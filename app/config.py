@@ -49,6 +49,9 @@ class Settings:
     agent_model: str = field(default_factory=lambda: os.getenv("AGENT_MODEL") or "gemini-3.1-flash-lite")
     # How the agents share context: "blackboard" (shared state, default) or "direct" (point-to-point hand-off)
     agent_messaging: str = field(default_factory=lambda: os.getenv("AGENT_MESSAGING") or "blackboard")
+    # How the agents are organised: "sequential" (one after another, default), "parallel" (three specialist
+    # investigators at once, ADK ParallelAgent) or "hierarchical" (a lead agent delegates, CrewAI hierarchical)
+    agent_pattern: str = field(default_factory=lambda: os.getenv("AGENT_PATTERN") or "sequential")
     # Where the agents run: "local" (in this process) or "a2a" (separate agent services, called over A2A)
     agent_transport: str = field(default_factory=lambda: os.getenv("AGENT_TRANSPORT") or "local")
     adk_agent_url: str = field(default_factory=lambda: os.getenv("ADK_AGENT_URL") or "http://localhost:8101/")

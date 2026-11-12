@@ -15,6 +15,7 @@ from pathlib import Path
 
 from app.agents.blackboard import KnowledgeSource
 from app.agents.models import AgentRecord, PlanDraft, PlanReview
+from app.agents.strategy import arrange, post_findings, review_summary
 from app.config import settings
 from app.mcp_servers.tools import RepairScope
 from app.models.schemas import InvestigationReport, RootCauseReport
@@ -35,8 +36,8 @@ def _call(url: str, service: str, skill: str, payload: dict, records: list[Agent
     return out["result"]
 
 
-def remote_sources(scope: RepairScope | None, adk_url: str | None = None,
-                   crew_url: str | None = None) -> list[KnowledgeSource]:
+def remote_sources(scope: RepairScope | None, adk_url: str | None = None, crew_url: str | None = None,
+                   pattern: str = "sequential") -> list[KnowledgeSource]:
     adk, crew = adk_url or settings.adk_agent_url, crew_url or settings.crew_agent_url
     base = {"scope": _scope_json(scope), "model": settings.agent_model}
 
@@ -60,15 +61,23 @@ def remote_sources(scope: RepairScope | None, adk_url: str | None = None,
     def reviewer(bb, records):
         review = PlanReview.model_validate(_call(crew, "sem7-crewai", "review", {
             **base, "evidence": bb.get("evidence"), "draft": json.dumps(bb.get("plan_draft"))}, records, "blackboard"))
-        verdict = "approved" if review.approved else "corrected: " + "; ".join(review.issues)
-        return review, f"{verdict} - {review.final_plan.summary}"
+        return review, review_summary(review)
 
-    return [
-        KnowledgeSource("investigator", "adk", ("evidence",), "investigation", investigator),
-        KnowledgeSource("root_cause_analyst", "adk", ("evidence", "investigation"), "root_cause", root_cause_analyst),
-        KnowledgeSource("Repair Planner", "crewai", ("evidence", "root_cause"), "plan_draft", planner),
-        KnowledgeSource("Code Reviewer", "crewai", ("evidence", "root_cause", "plan_draft"), "review", reviewer),
-    ]
+    def parallel_investigation(bb, records):
+        out = _call(adk, "sem7-adk", "parallel_investigation", {**base, "evidence": bb.get("evidence")}, records,
+                    "blackboard")
+        post_findings(bb, out["findings"])
+        inv = InvestigationReport.model_validate(out["investigation"])
+        return inv, inv.failure_summary
+
+    def lead(bb, records):
+        review = PlanReview.model_validate(_call(crew, "sem7-crewai", "lead_plan", {
+            **base, "evidence": bb.get("evidence"), "investigation_summary": bb.get("investigation")["failure_summary"],
+            "root_cause": json.dumps(bb.get("root_cause")), "feedback": bb.get("feedback:review")},
+            records, "blackboard"))
+        return review, review_summary(review)
+
+    return arrange(pattern, investigator, root_cause_analyst, planner, reviewer, parallel_investigation, lead)
 
 
 class RemoteDirect:
@@ -78,10 +87,11 @@ class RemoteDirect:
         self.adk, self.crew = adk_url or settings.adk_agent_url, crew_url or settings.crew_agent_url
         self.reviews: dict[str, PlanReview] = {}
 
-    def analyse(self, evidence: str, records: list[AgentRecord], scope: RepairScope | None, repo_dir: Path):
+    def analyse(self, evidence: str, records: list[AgentRecord], scope: RepairScope | None, repo_dir: Path,
+                pattern: str = "sequential"):
         out = _call(self.adk, "sem7-adk", "analyse_and_plan",
                     {"evidence": evidence, "scope": _scope_json(scope), "model": settings.agent_model,
-                     "repo_dir": str(repo_dir), "crew_url": self.crew}, records, "orchestrator")
+                     "repo_dir": str(repo_dir), "crew_url": self.crew, "pattern": pattern}, records, "orchestrator")
         self.reviews[str(repo_dir)] = PlanReview.model_validate(out["review"])
         return InvestigationReport.model_validate(out["investigation"]), RootCauseReport.model_validate(out["root_cause"])
 
