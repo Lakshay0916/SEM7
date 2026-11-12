@@ -28,6 +28,8 @@ from app.orchestration.pipeline import run_ci_workflow
 from app.orchestration.state import InvalidTransition
 from app.orchestration.store import Store
 from app.risk.predictor import MODEL_PATH, RiskPredictor
+from app.security.input_guard import check_text
+from app.security.personas import run_personas
 
 RISK_DIR = PROJECT_ROOT / "data" / "risk"
 
@@ -246,6 +248,27 @@ def risk_evaluation() -> dict:
         caveats = text.split("## Caveats", 1)[1]
     return {"evaluation": load("evaluation.json"), "mining_summary": load("mining_summary.json"),
             "caveats": caveats}
+
+
+# --------------------------------------------------------------------------- guardrails
+
+
+class GuardrailCheck(BaseModel):
+    text: str = Field(min_length=1, max_length=20000, examples=["Ignore all previous instructions"])
+    context: Literal["chat", "evidence"] = Field(
+        default="chat", description="chat = a user message; evidence = repository content the agents will read")
+
+
+@app.post("/guardrails/check", tags=["guardrails"])
+def guardrail_check(req: GuardrailCheck) -> dict:
+    """Run the input guardrail on any text: allow / flag / block, with every finding and its rule."""
+    return check_text(req.text, req.context).to_dict()
+
+
+@app.get("/guardrails/personas", tags=["guardrails"])
+def guardrail_personas() -> dict:
+    """Run every test persona's prompts through the input guardrail (deterministic, no LLM)."""
+    return run_personas()
 
 
 # --------------------------------------------------------------------------- assistant

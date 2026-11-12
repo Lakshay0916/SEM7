@@ -63,6 +63,12 @@ class ApiClient:
 
     def safety_check(self, wf_id: str) -> dict: return self._req("POST", f"/workflows/{wf_id}/safety-check")
 
+    # guardrails
+    def guardrail_check(self, text: str, context: str = "chat") -> dict:
+        return self._req("POST", "/guardrails/check", {"text": text, "context": context})
+
+    def guardrail_personas(self) -> dict: return self._req("GET", "/guardrails/personas")
+
     # risk
     def risk_model(self) -> dict | None:
         try:

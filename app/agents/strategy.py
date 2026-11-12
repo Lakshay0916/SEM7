@@ -34,6 +34,7 @@ from app.config import settings
 from app.healing.rules import RuleBasedStrategy
 from app.healing.strategy import RepairContext
 from app.models.schemas import InvestigationReport, RepairPlan, RootCauseReport
+from app.security.input_guard import InputBlocked, Verdict, check_text, spotlight
 
 Analysts = Callable[[str, list[AgentRecord]], tuple[InvestigationReport, RootCauseReport]]
 Planner = Callable[[str, InvestigationReport, RootCauseReport, RepairContext, list[AgentRecord]], PlanDraft]
@@ -194,6 +195,7 @@ class AgenticStrategy:
         self.fallback = RuleBasedStrategy() if (settings.agent_fallback if fallback is None else fallback) else None
         self.records: list[AgentRecord] = []
         self.boards: dict[int, Blackboard] = {}
+        self.blocked: dict[int, Verdict] = {}  # attempts whose evidence the input guardrail kept from the agents
         self._cache: dict[int, tuple[str, RootCauseReport | None]] = {}  # attempt -> (evidence, root cause)
 
     def pop_records(self) -> list[AgentRecord]:
@@ -224,14 +226,30 @@ class AgenticStrategy:
 
     # ------------------------------------------------------------------ interface
 
+    def _screen(self, ctx: RepairContext, evidence: str) -> tuple[str, Verdict]:
+        """Input guardrail: scan the evidence for prompt injection before any agent reads it."""
+        verdict = check_text(evidence, "evidence")
+        status = {"allow": "ok", "flag": "flagged", "block": "blocked"}[verdict.action]
+        self.records.append(AgentRecord(agent="input guardrail", framework="system", status=status,
+                                        message=f"{verdict.action}: {verdict.summary}"[:400]))
+        if verdict.action == "block":
+            self.blocked[ctx.attempt] = verdict
+        return spotlight(evidence, verdict), verdict
+
     def investigate(self, ctx: RepairContext) -> InvestigationReport:
-        evidence = build_evidence(ctx)
+        evidence, verdict = self._screen(ctx, build_evidence(ctx))
+        if self.messaging == "blackboard":
+            bb = self.boards[ctx.attempt] = Blackboard(ctx.attempt)
+            bb.post("evidence", evidence, author="orchestrator", framework="system",
+                    summary=f"evidence package for attempt {ctx.attempt}: "
+                            f"{len(ctx.failing_tests)} failing test(s), {len(evidence)} chars")
+            if verdict.findings:
+                bb.post("guardrail:input", verdict.to_dict(), author="input guardrail", framework="guardrail",
+                        summary=f"{verdict.action}: {verdict.summary}"[:300])
         try:
+            if verdict.action == "block":
+                raise InputBlocked(f"input guardrail kept the evidence from the agents ({verdict.summary})"[:300])
             if self.messaging == "blackboard":
-                bb = self.boards[ctx.attempt] = Blackboard(ctx.attempt)
-                bb.post("evidence", evidence, author="orchestrator", framework="system",
-                        summary=f"evidence package for attempt {ctx.attempt}: "
-                                f"{len(ctx.failing_tests)} failing test(s), {len(evidence)} chars")
                 self._controller(ctx).run_until(bb, "root_cause", self.records)
                 inv = InvestigationReport.model_validate(bb.get("investigation"))
                 rc = RootCauseReport.model_validate(bb.get("root_cause"))
@@ -266,6 +284,8 @@ class AgenticStrategy:
              root_cause: RootCauseReport) -> RepairPlan | None:
         evidence = self._cache.get(ctx.attempt, (None,))[0] or build_evidence(ctx)
         try:
+            if ctx.attempt in self.blocked:
+                raise InputBlocked("input guardrail blocked this attempt's evidence; the agents were not run")
             if self.messaging == "blackboard":
                 review = PlanReview.model_validate(self._controller(ctx).run_until(self.boards[ctx.attempt],
                                                                                    "review", self.records))

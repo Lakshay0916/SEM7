@@ -7,6 +7,9 @@ from ui.workflow_view import render_workflow
 SCENARIO_HINT = {
     "simple_bug": "Expect: tests **fail** (2 of 9); one minimal fix (restore `+`) repairs it after your approval.",
     "high_risk_change": "Expect: tests **pass** but the change is broad - shows that risk ≠ bug.",
+    "injected_commit": "Expect: tests **fail** (2 of 9). With AI agents, the **input guardrail** finds the instructions "
+                       "hidden in the code comment and keeps the evidence from the agents, so the rule-based engine "
+                       "fixes it instead - see the 🛡️ post on the blackboard and the `input guardrail` event.",
     "failed_first_repair": "Expect: tests **fail** (3 of 9) from two defects. Rule-based: fix 1 only partly works → "
                            "reflection → fix 2 → tests pass → PR. AI agents usually fix both defects in one attempt.",
 }

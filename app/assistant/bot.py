@@ -1,6 +1,8 @@
 """Project assistant: answers questions about SEM7 and its workflow runs.
 
 Read-only by design - it never runs pipelines, approves fixes or changes code.
+Every message first passes the input guardrail (app/security): prompt injection and abuse are refused
+before any retrieval or model call, and secrets are redacted from every answer.
 
 * heuristic (default, offline): live-data intents + TF-IDF retrieval over the knowledge base.
 * anthropic: Claude answers, grounded in the whole knowledge base (cached system prompt) plus
@@ -17,6 +19,7 @@ from app.assistant.knowledge import Hit, KnowledgeBase
 from app.assistant.live import render_digest, render_snapshot, snapshot, workflow_digest
 from app.config import Settings, settings as default_settings
 from app.orchestration.store import Store
+from app.security.input_guard import check_text, refusal
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +63,20 @@ action, tell them where to do it (Run Pipeline page, Workflow History page, or t
 exact command or file path when one helps. Keep answers concise unless asked for detail."""
 
 
+def _safe_history(history: list[dict]) -> list[dict]:
+    """Drop earlier turns the guardrail would block (and the refusal after them) before they reach a model."""
+    out, skip_reply = [], False
+    for turn in history:
+        if turn.get("role") == "user" and check_text(str(turn.get("content", "")), "chat").action == "block":
+            skip_reply = True
+            continue
+        if skip_reply and turn.get("role") == "assistant":
+            skip_reply = False
+            continue
+        out.append(turn)
+    return out
+
+
 @dataclass
 class ChatReply:
     answer: str
@@ -68,6 +85,7 @@ class ChatReply:
     model: str | None = None
     workflow_id: str | None = None
     note: str | None = None
+    guardrail: str = "allow"  # the input guardrail's verdict on the message: allow | flag | block
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -93,6 +111,25 @@ class Assistant:
 
     def reply(self, message: str, history: list[dict] | None = None, workflow_id: str | None = None) -> ChatReply:
         message = message.strip()
+        verdict = check_text(message, "chat")
+        if verdict.action == "block":
+            log.warning("assistant: message blocked by the input guardrail: %s", verdict.summary)
+            return ChatReply(refusal(verdict), "guardrail", workflow_id=workflow_id, guardrail="block",
+                             note="Blocked by the input guardrail: " + ", ".join(f.rule for f in verdict.findings))
+        if verdict.action == "flag":
+            log.info("assistant: message flagged by the input guardrail: %s", verdict.summary)
+        reply = self._answer(message, _safe_history(history or []), workflow_id)
+        reply.answer = self._redact(reply.answer)
+        reply.guardrail = verdict.action
+        return reply
+
+    def _redact(self, text: str) -> str:
+        for secret in self.cfg.secret_values():
+            if secret:
+                text = text.replace(secret, "[REDACTED]")
+        return text
+
+    def _answer(self, message: str, history: list[dict], workflow_id: str | None) -> ChatReply:
         mentioned = WF_ID_RE.search(message)
         wf_id = mentioned.group(0) if mentioned else workflow_id
         digest = workflow_digest(self.store, wf_id) if wf_id else None  # KeyError -> 404 at the API

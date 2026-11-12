@@ -301,12 +301,27 @@ does what and delegates drafting to the Repair Planner and checking to the Code 
 delegation is recorded. All three work with the blackboard or direct hand-off, locally or over A2A, and
 go through the same guardrails, human approval and real tests.
 
+## What guardrails are there? Prompt injection, toxicity and personas
+Everything a model reads is checked first by the input guardrail (app/security/input_guard.py), with
+explainable pattern rules: prompt injection (ignore previous instructions, role hijacking, jailbreak
+modes, asking for the system prompt or API keys, deleting tests, skipping approval or pushing to main,
+chat-template tokens, hidden zero-width characters) and toxicity (insults, threats, profanity). Each
+check returns allow, flag or block with the rule that matched. For the repair agents the evidence
+always starts with a note that it is data, not instructions; flagged evidence gets a warning; blocked
+evidence never reaches the agents and the rule-based engine repairs instead (scenario 4 shows this with
+an injection hidden in a code comment). For this assistant, blocked messages get a polite refusal before
+any retrieval or model call, and secrets are redacted from answers. Behind that, the output guardrails
+check every plan, a human approves, and real tests decide. Seven test personas (student, developer,
+prompt injector, data thief, saboteur, abusive user, hostile committer) with 33 prompts measure it on the
+Guardrails page: 20 of 21 attacks caught and none of the 12 friendly prompts blocked. The miss is a
+paraphrased injection that pattern rules cannot detect.
+
 ## What is planned next?
 Already built for Agentic AI: the ADK + CrewAI agents, the blackboard (and direct hand-off), MCP tools,
-A2A agent services, sequential / parallel / hierarchical agent patterns, and cloud deployment of
-everything on AWS EC2. Still to come for Agentic AI: prompt-injection and toxicity guardrails tested
-with personas, a per-agent heat map and tracing, and a 40-run evaluation with boxplots that also
-compares the patterns.
+A2A agent services, sequential / parallel / hierarchical agent patterns, prompt-injection and
+toxicity guardrails tested with personas, and cloud deployment of everything on AWS EC2. Still to
+come for Agentic AI: a per-agent heat map and tracing, and a 40-run evaluation with boxplots that
+also compares the patterns.
 After that, for DevOps: Terraform for infrastructure as code, automatic deployment (CD) from GitHub
 Actions, monitoring dashboards, and a real GitHub PR adapter.
 

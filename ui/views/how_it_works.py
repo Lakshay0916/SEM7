@@ -151,5 +151,8 @@ def render() -> None:
         "| No auto-merge | PRs are opened only after real tests pass and are never merged | `app/healing/loop.py` |\n"
         "| No leaked secrets | Secrets come from env only, are hidden from repr, and are redacted in logs and the "
         "database | `app/config.py`, `app/logging_utils.py` |\n"
-        "| No infinite repair loops | Retries capped by `MAX_REPAIR_ATTEMPTS` (default 3) | `app/config.py` |"
+        "| No infinite repair loops | Retries capped by `MAX_REPAIR_ATTEMPTS` (default 3) | `app/config.py` |\n"
+        "| No prompt injection or abuse reaches a model | Evidence and chat messages are checked first; blocked "
+        "evidence never reaches the agents, blocked messages get a refusal (see the Guardrails page) | "
+        "`app/security/input_guard.py` |"
     )
