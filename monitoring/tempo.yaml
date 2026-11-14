@@ -1,5 +1,7 @@
 # Grafana Tempo: stores the traces (OTLP from the Collector) and turns them into a service map and
 # span metrics (written to Prometheus), so Grafana can show who calls whom and how fast.
+stream_over_http_enabled: true   # Grafana queries Tempo by streaming over the HTTP port
+
 server:
   http_listen_port: 3200
 
