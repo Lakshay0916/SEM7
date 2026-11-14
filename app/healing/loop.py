@@ -28,6 +28,7 @@ from app.models.schemas import (
     TestReport,
 )
 from app.models.schemas import WorkflowState as S
+from app.notifications.notifier import notify
 from app.observability import metrics
 from app.orchestration.store import Store
 from app.reporting.markdown import render_pr_body
@@ -119,6 +120,7 @@ def propose_fix(store: Store, wf_id: str, strategy: RepairStrategy) -> RepairPla
                      agent=agent)
     store.transition(wf_id, S.WAITING_APPROVAL, "Waiting for human approval - no code has been changed",
                      agent="orchestrator")
+    notify(store, wf_id, "waiting_approval")
     return plan
 
 
@@ -136,6 +138,7 @@ def decide(store: Store, wf_id: str, approved: bool, reviewer: str, comment: str
 def abort(store: Store, wf_id: str, reason: str, agent: str = "human") -> None:
     store.transition(wf_id, S.ABORTED, reason, agent=agent)
     _record_outcome(store, wf_id, "aborted")
+    notify(store, wf_id, "aborted", reason)
 
 
 def _record_outcome(store: Store, wf_id: str, outcome: str) -> None:
@@ -194,6 +197,7 @@ def apply_and_verify(
         store.transition(wf_id, S.PR_CREATED, f"PR opened ({pr.provider}): {branch} → {pr.base_branch} "
                          "(not merged)", agent="pr")
         _record_outcome(store, wf_id, "pr_created")
+        notify(store, wf_id, "pr_created")
         return S.PR_CREATED
 
     # ---- reflection

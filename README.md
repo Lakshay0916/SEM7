@@ -242,6 +242,12 @@ The same compose stack runs on one EC2 instance behind Caddy (HTTPS + login), cr
   health-checked (`deploy/healthcheck.sh`), the SSH rule removed and the server stopped again (tick *keep running*
   to leave it up). Secrets: `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (the EC2-only `sem7-deployer` user) and
   `EC2_SSH_KEY` (a dedicated deploy key). Logins created during a CI deploy are saved on the server, never logged.
+- **Telegram notifications (`app/notifications/`):** the self-healing loop messages you automatically when a fix
+  is **waiting for approval** (every attempt), when a **pull request is created**, and when a workflow **stops**
+  (attempt limit, unsafe plan, no fix, or aborted) - with the commit, risk, quality gate, root cause, fix, test
+  results, approver, tokens and cost, all read from the workflow's records. Set `TELEGRAM_BOT_TOKEN` and
+  `TELEGRAM_CHAT_ID` in `.env` (`deploy/deploy.sh` forwards them to the server); `POST /notifications/test` sends a
+  test message. A failed send is retried once and logged, and never stops the workflow.
 - **OpenTelemetry + monitoring (compose profile `monitoring`, on by default on EC2):** the API and both agent services
   export traces, metrics and trace-linked logs over OTLP (`app/observability/otel.py`, `metrics.py`) to an
   **OpenTelemetry Collector**, which also collects host and container metrics, then **Tempo** (traces, service map)

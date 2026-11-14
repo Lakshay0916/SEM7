@@ -43,6 +43,12 @@ if [[ "${DEPLOY_AGENTS:-1}" == "1" && -n "$GEMINI_KEY" ]]; then
   printf '%s' "$GEMINI_KEY" | "${SSH[@]}" 'umask 077; mkdir -p ~/sem7; cat > ~/sem7/.gemini-key'
 fi
 
+# Telegram notifications: forwarded from the local .env the same way (stdin, never on a command line).
+FORWARD="$(grep -E '^(TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID)=.' "$ROOT/.env" 2>/dev/null || true)"
+if [[ -n "$FORWARD" ]]; then
+  printf '%s\n' "$FORWARD" | "${SSH[@]}" 'umask 077; mkdir -p ~/sem7; cat > ~/sem7/.forwarded-env'
+fi
+
 # Same server-side steps as the CD workflow: deploy/remote-deploy.sh, copied over and run as a file with
 # stdin closed (a script piped in on stdin can be swallowed by a command inside it that reads stdin).
 scp -i "$KEY" -q "$ROOT/deploy/remote-deploy.sh" "ubuntu@$IP:/tmp/sem7-remote-deploy.sh"

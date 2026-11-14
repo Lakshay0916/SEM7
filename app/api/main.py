@@ -283,6 +283,29 @@ def agent_evaluation() -> dict:
     return {"runs": runs, "summary": json.loads(summary.read_text(encoding="utf-8")) if summary.exists() else None}
 
 
+# --------------------------------------------------------------------------- notifications
+
+
+@app.post("/notifications/test", tags=["notifications"])
+def notification_test() -> dict:
+    """Send a test message through the configured channel (Telegram) to check the setup."""
+    from app.notifications.notifier import channel
+
+    via = channel()
+    if via is None:
+        return {"configured": False, "sent": False,
+                "detail": "set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env (and NOTIFY is not 0)"}
+    try:
+        via.send("🔔 <b>SEM7</b> test message: notifications are set up. You will hear about fixes waiting for "
+                 "approval, pull requests created and workflows that stop.")
+    except Exception as exc:
+        detail = f"{type(exc).__name__}: {exc}"
+        for secret in settings.secret_values():
+            detail = detail.replace(secret, "[REDACTED]")
+        return {"configured": True, "sent": False, "detail": detail}
+    return {"configured": True, "sent": True, "detail": "test message sent"}
+
+
 # --------------------------------------------------------------------------- guardrails
 
 

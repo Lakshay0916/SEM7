@@ -28,7 +28,8 @@ first_login() {  # a newly created login: shown once - but never into CI logs, w
 
 mkdir -p ~/sem7 && cd ~/sem7
 # Replace the code, keep server-only secrets.
-find . -mindepth 1 -maxdepth 1 ! -name .env ! -name .gemini-key ! -name deploy -exec rm -rf {} +
+find . -mindepth 1 -maxdepth 1 ! -name .env ! -name .gemini-key ! -name .forwarded-env ! -name deploy \
+  -exec rm -rf {} +
 find deploy -mindepth 1 ! -name auth.caddy -delete 2>/dev/null || true
 tar -xzf "$RELEASE" && rm -f "$RELEASE"
 
@@ -62,6 +63,15 @@ if [[ "$AGENTS" == "1" && -f .gemini-key ]]; then
   set_env GEMINI_API_KEY "$KEY"
   echo "agent services: Gemini key updated"
 fi
+# Settings forwarded from the deploying laptop (Telegram notifications): each line replaces the server's value.
+if [[ -f .forwarded-env ]]; then
+  while IFS='=' read -r key value; do
+    [[ "$key" =~ ^(TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID)$ ]] && set_env "$key" "$value"
+  done < .forwarded-env
+  rm -f .forwarded-env
+  echo "notification settings updated"
+fi
+
 PROFILES=()
 if [[ "$AGENTS" != "0" ]] && grep -q '^GOOGLE_API_KEY=.' .env; then
   PROFILES+=(agents)

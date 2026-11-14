@@ -61,11 +61,19 @@ class Settings:
     google_api_key: str = field(default_factory=lambda: os.getenv("GOOGLE_API_KEY", ""), repr=False)
     gemini_api_key: str = field(default_factory=lambda: os.getenv("GEMINI_API_KEY", ""), repr=False)
     repository_url: str = field(default_factory=lambda: os.getenv("REPOSITORY_URL", ""))
+    # Telegram notifications (fix waiting for approval / PR created / stopped). Off without a token and chat id;
+    # NOTIFY=0 switches them off everywhere (the evaluation runner and the tests do).
+    telegram_bot_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""), repr=False)
+    telegram_chat_id: str = field(default_factory=lambda: os.getenv("TELEGRAM_CHAT_ID", ""))
+    notify: bool = field(default_factory=lambda: os.getenv("NOTIFY", "1") not in ("0", "false", "no"))
+    # Public address of the web UI, for links in notifications (on EC2: https://<SITE_HOST>)
+    public_url: str = field(default_factory=lambda: os.getenv("PUBLIC_URL")
+                            or (f"https://{os.environ['SITE_HOST']}" if os.getenv("SITE_HOST") else ""))
 
     def secret_values(self) -> list[str]:
         """Non-empty secret values, used by the log redaction filter."""
         return list(dict.fromkeys(s for s in (self.llm_api_key, self.github_token, self.google_api_key,
-                                              self.gemini_api_key) if s))
+                                              self.gemini_api_key, self.telegram_bot_token) if s))
 
 
 settings = Settings()

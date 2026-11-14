@@ -10,6 +10,7 @@ What the Grafana dashboards are built from:
     sem7.tool.calls                 MCP tool calls, by tool / status
     sem7.a2a.duration               seconds per A2A hop, by service / skill (histogram)
     sem7.guardrail.verdicts         input-guardrail decisions, by context (chat | evidence) / action
+    sem7.notifications              notifications sent (or failed), by channel / event / status
 HTTP request rates and latencies come from the FastAPI instrumentation.
 """
 
@@ -37,6 +38,7 @@ def _instruments() -> dict:
         "tool_calls": m.create_counter("sem7.tool.calls", description="MCP tool calls by status"),
         "a2a_duration": m.create_histogram("sem7.a2a.duration", unit="s", description="Seconds per A2A hop"),
         "guardrail": m.create_counter("sem7.guardrail.verdicts", description="Input-guardrail decisions"),
+        "notifications": m.create_counter("sem7.notifications", description="Notifications sent, by status"),
     }
 
 
@@ -93,3 +95,7 @@ def record_workflow(outcome: str, attempts: int, strategy: str | None, pattern: 
 
 def record_guardrail(context: str, action: str) -> None:
     _instruments()["guardrail"].add(1, {"context": context, "action": action})
+
+
+def record_notification(channel: str, event: str, status: str) -> None:
+    _instruments()["notifications"].add(1, {"channel": channel, "event": event, "status": status})

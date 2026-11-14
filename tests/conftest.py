@@ -8,6 +8,7 @@ import pytest
 # (Set before app.config loads .env - an existing environment variable wins over .env.)
 os.environ["LLM_PROVIDER"] = "heuristic"
 os.environ.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
+os.environ["NOTIFY"] = "0"  # no test sends a real Telegram message (tests that check sending use a fake channel)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 

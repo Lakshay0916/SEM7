@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "data" / "eval"
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{OUT / 'eval.sqlite3'}")  # its own database
 os.environ.setdefault("WORKSPACE_DIR", str(OUT / "workspace"))
+os.environ["NOTIFY"] = "0"  # 42 runs would mean 100+ Telegram messages
 sys.path.insert(0, str(ROOT))
 
 from app.evaluation.runner import matrix, run_one  # noqa: E402
