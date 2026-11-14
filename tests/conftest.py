@@ -9,6 +9,8 @@ import pytest
 os.environ["LLM_PROVIDER"] = "heuristic"
 os.environ.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
 os.environ["NOTIFY"] = "0"  # no test sends a real Telegram message (tests that check sending use a fake channel)
+for name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):  # a real token from .env must never reach a test (or its output)
+    os.environ[name] = ""
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 

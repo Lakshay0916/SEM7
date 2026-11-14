@@ -190,3 +190,20 @@ def test_trace_links_to_grafana_only_when_monitoring_runs(monkeypatch):
     url = grafana_trace_url(root)
     assert url.startswith("https://grafana.example.sslip.io/explore?") and "4bf92f3577b34da6a3ce929d0e0e4736" in unquote(url)
     assert grafana_trace_url({"kind": "attempt", "attributes": {}}) is None
+
+
+def test_workflow_view_shows_the_repository():
+    import app.api.main as api
+
+    from app.healing.loop import apply_and_verify, decide
+    from app.healing.rules import RuleBasedStrategy
+    from app.orchestration.pipeline import run_ci_workflow
+
+    store, strategy = api.get_store(), RuleBasedStrategy()
+    wf = run_ci_workflow("simple_bug", store, None, strategy=strategy).workflow_id
+    decide(store, wf, True, "alice")
+    apply_and_verify(store, wf, strategy=strategy)
+    at = _page("ui.views.workflows").run()
+    assert not at.exception, at.exception
+    repo = next(e for e in at.expander if e.label.startswith("🗂️ Repository"))
+    assert any("SEM7 AI Repair" in c.value for c in repo.code)

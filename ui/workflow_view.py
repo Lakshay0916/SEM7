@@ -199,6 +199,26 @@ def _trace(wf_id: str, attempt: int, spans: list[dict]) -> None:
             pass
 
 
+def _repository(api: ApiClient, wf_id: str) -> None:
+    """The sandbox's real git repository on the server: who committed what, on which branch."""
+    with st.expander("🗂️ Repository - the real git history on the server", expanded=False):
+        try:
+            repo = api.repository(wf_id)
+        except APIError as exc:
+            st.info(exc.detail)
+            return
+        st.caption(f"`{repo['path']}` (inside the api container) · checked out: `{repo['current_branch']}`. "
+                   "`main` and the developer's branch are never changed by the AI; each repair is a commit by "
+                   "**SEM7 AI Repair** on its own `ai/repair/...` branch, made only after a human approved it.")
+        st.dataframe(pd.DataFrame(repo["branches"]).rename(columns=str.capitalize), hide_index=True, width="stretch")
+        st.markdown("**History of all branches** (`git log --all --graph`)")
+        st.code(repo["graph"], language="text")
+        if repo.get("pull_request"):
+            st.markdown(f"**Pull request file** `{repo['pull_request']['file']}` (opened, never merged)")
+            with st.container(height=260):
+                st.markdown(repo["pull_request"]["content"])
+
+
 def _healing(api: ApiClient, tv: TraceView, wf_id: str) -> None:
     state = S(tv.state())
     attempts = sorted(_by_attempt(tv, "investigation"))
@@ -388,6 +408,7 @@ def render_workflow(wf_id: str) -> None:
     # 6. Self-healing -------------------------------------------------------------
     if failed:
         _healing(api, tv, wf_id)
+        _repository(api, wf_id)
 
     # 7. Recorded -------------------------------------------------------------------
     with st.container(border=True, key="step-done-7"):

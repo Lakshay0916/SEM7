@@ -145,3 +145,22 @@ def test_workflow_keeps_the_strategy_it_started_with(client, monkeypatch):
     plan = next(a["payload"] for a in client.get(f"/workflows/{rules_run['workflow_id']}").json()["artifacts"]
                 if a["kind"] == "repair_plan")
     assert plan["strategy"] == "rule-based"
+
+
+def test_repository_shows_the_ai_repair_commit_on_its_own_branch(client):
+    wf = client.post("/workflows", json={"scenario": "simple_bug", "strategy": "rules"}).json()["workflow_id"]
+    assert client.post(f"/workflows/{wf}/approve", json={"reviewer": "alice"}).json()["state"] == "PR_CREATED"
+    repo = client.get(f"/workflows/{wf}/repository").json()
+    branches = {b["branch"]: b for b in repo["branches"]}
+    assert {"main", "feature/refactor-add", f"ai/repair/{wf}"} <= set(branches)
+    assert branches[f"ai/repair/{wf}"]["author"] == "SEM7 AI Repair"
+    assert branches["main"]["author"] != "SEM7 AI Repair"                 # main untouched by the AI
+    assert "AI repair attempt 1" in repo["graph"] and repo["pull_request"]["file"] == f"PR_ai_repair_{wf}.md"
+    assert "(not merged)" in repo["pull_request"]["content"]
+
+
+def test_repository_refuses_anything_but_a_sandbox(client, monkeypatch):
+    wf = client.post("/workflows", json={"scenario": "simple_bug", "strategy": "rules"}).json()["workflow_id"]
+    store = api.get_store()
+    monkeypatch.setattr(store, "get_workflow", lambda w: {"repo_path": "/etc"})
+    assert client.get(f"/workflows/{wf}/repository").status_code == 404

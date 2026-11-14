@@ -20,7 +20,8 @@ def test_secrets_not_in_repr(monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "ghp_super_secret")
     monkeypatch.setenv("GOOGLE_API_KEY", "AIza-fake-google")  # never the real key from .env
     monkeypatch.setenv("GEMINI_API_KEY", "AIza-fake-google")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:fake-telegram")
     s = Settings()
-    for secret in ("sk-super-secret", "ghp_super_secret", "AIza-fake-google"):
+    for secret in ("sk-super-secret", "ghp_super_secret", "AIza-fake-google", "123:fake-telegram"):
         assert secret not in repr(s)
-    assert s.secret_values() == ["sk-super-secret", "ghp_super_secret", "AIza-fake-google"]
+    assert s.secret_values() == ["sk-super-secret", "ghp_super_secret", "AIza-fake-google", "123:fake-telegram"]

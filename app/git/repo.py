@@ -17,6 +17,8 @@ from app.config import settings
 from app.models.schemas import CommitInfo
 
 Actor = Literal["developer", "ai"]
+# Commits made by the repair agent carry their own identity, so `git log` shows at a glance who changed what.
+AI_IDENTITY = ("SEM7 AI Repair", "ai-repair@sem7.local")
 
 
 class GitError(RuntimeError):
@@ -33,6 +35,25 @@ class GitRepo:
         self.actor = actor
 
     # ------------------------------------------------------------------ core
+
+    def _identity(self) -> list[str]:
+        """`git -c` options that make an AI actor's commits authored (and committed) by the AI identity."""
+        if self.actor != "ai":
+            return []
+        name, email = AI_IDENTITY
+        return ["-c", f"user.name={name}", "-c", f"user.email={email}"]
+
+    def overview(self, limit: int = 40) -> dict:
+        """Read-only view of the repository for the UI: branches, the history graph of all branches."""
+        branches = []
+        for line in self._run("for-each-ref", "refs/heads",
+                              "--format=%(refname:short)%1f%(objectname:short)%1f%(authorname)%1f%(subject)"
+                              ).splitlines():
+            name, sha, author, subject = line.split("\x1f", 3)
+            branches.append({"branch": name, "commit": sha, "author": author, "subject": subject})
+        graph = self._run("log", "--all", "--graph", "--decorate", "--date=format:%Y-%m-%d %H:%M",
+                          f"--max-count={limit}", "--format=%h  %ad  %an  %s%d")
+        return {"current_branch": self.current_branch(), "branches": branches, "graph": graph}
 
     def _run(self, *args: str, check: bool = True) -> str:
         proc = subprocess.run(
@@ -137,7 +158,7 @@ class GitRepo:
         self._run("add", "-A")
         if self.is_clean():
             raise GitError("nothing to commit")
-        self._run("commit", "-q", "-m", message)
+        self._run(*self._identity(), "commit", "-q", "-m", message)
         return self.head_sha()
 
     def commit_paths(self, paths: list[str], message: str) -> str:
@@ -146,7 +167,7 @@ class GitRepo:
         self._run("add", "--", *paths)
         if self._run("diff", "--cached", "--name-only").strip() == "":
             raise GitError("nothing staged to commit")
-        self._run("commit", "-q", "-m", message)
+        self._run(*self._identity(), "commit", "-q", "-m", message)
         return self.head_sha()
 
     def reset_hard(self, ref: str) -> None:

@@ -54,3 +54,26 @@ def test_duplicate_branch_rejected(git_project):
     git_project.checkout("main")
     with pytest.raises(GitError):
         git_project.create_branch("feature/x")
+
+
+def test_ai_commits_are_authored_by_the_ai_identity(git_project):
+    from app.git.repo import AI_IDENTITY
+
+    ai = GitRepo(git_project.path, actor="ai")
+    ai.create_branch("ai/repair/issue-9")
+    (ai.path / "src/mod.py").write_text("def f():\n    return 2\n")
+    ai.commit_paths(["src/mod.py"], "repair")
+    assert ai._run("log", "-1", "--format=%an <%ae>|%cn").strip() == f"{AI_IDENTITY[0]} <{AI_IDENTITY[1]}>|{AI_IDENTITY[0]}"
+    assert GitRepo(git_project.path)._run("log", "-1", "--format=%an", "main").strip() != AI_IDENTITY[0]
+
+
+def test_overview_shows_branches_and_history(git_project):
+    ai = GitRepo(git_project.path, actor="ai")
+    ai.create_branch("ai/repair/issue-10")
+    (ai.path / "src/mod.py").write_text("def f():\n    return 3\n")
+    ai.commit_paths(["src/mod.py"], "AI repair attempt 1")
+    view = ai.overview()
+    names = {b["branch"]: b for b in view["branches"]}
+    assert view["current_branch"] == "ai/repair/issue-10" and {"main", "ai/repair/issue-10"} <= set(names)
+    assert names["ai/repair/issue-10"]["author"] == "SEM7 AI Repair"
+    assert "AI repair attempt 1" in view["graph"] and "SEM7 AI Repair" in view["graph"] and "*" in view["graph"]

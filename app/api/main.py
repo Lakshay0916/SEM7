@@ -9,6 +9,7 @@ self-healing logic lives here. Run locally with:
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from functools import lru_cache
 from typing import Literal
 
@@ -20,6 +21,7 @@ from app.assistant.bot import Assistant
 from app.assistant.knowledge import KnowledgeBase
 from app.ci.scenarios import SCENARIOS
 from app.config import PROJECT_ROOT, settings
+from app.git.repo import GitRepo
 from app.git.safety import try_ai_commit_to_main
 from app.healing.loop import HealingError, abort, apply_and_verify, decide, propose_fix
 from app.healing.factory import make_strategy, strategy_options
@@ -190,6 +192,19 @@ def list_workflows(limit: int = 100) -> list[dict]:
 def get_workflow(wf_id: str) -> dict:
     """Full trace: workflow row, every event, every artifact."""
     return get_store().trace(wf_id)
+
+
+@app.get("/workflows/{wf_id}/repository", tags=["workflows"])
+def workflow_repository(wf_id: str) -> dict:
+    """The workflow's sandbox git repository, read-only: branches, the history of all branches (the developer's
+    commit and every AI repair commit, each on its own branch) and the pull-request file."""
+    repo = Path(get_store().get_workflow(wf_id)["repo_path"]).resolve()
+    # only ever a sandbox the pipeline created: <workspace>/runs/<run id>/repo
+    if repo.name != "repo" or repo.parent.parent.name != "runs" or not (repo / ".git").exists():
+        raise HTTPException(status_code=404, detail="this workflow's sandbox repository is no longer on this server")
+    pr = next(iter(sorted(repo.parent.glob("PR_*.md"))), None)
+    return {"workflow_id": wf_id, "path": str(repo), **GitRepo(repo).overview(),
+            "pull_request": {"file": pr.name, "content": pr.read_text(encoding="utf-8")[:20000]} if pr else None}
 
 
 @app.get("/workflows/{wf_id}/trace", tags=["observability"])
