@@ -1,0 +1,60 @@
+# OpenTelemetry Collector: the one place all telemetry goes through.
+#
+#   receives  OTLP traces + metrics from the api and both agent services (http :4318, grpc :4317),
+#             host metrics (CPU, memory, disk, network) and per-container stats (Docker socket)
+#   sends     traces -> Tempo, metrics -> exposed on :8889 for Prometheus to scrape
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  hostmetrics:
+    root_path: /hostfs            # the host's filesystem, mounted read-only
+    collection_interval: 15s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization: {enabled: true}
+      memory:
+        metrics:
+          system.memory.utilization: {enabled: true}
+      load: {}
+      filesystem:
+        metrics:
+          system.filesystem.utilization: {enabled: true}
+        exclude_fs_types: {fs_types: [autofs, binfmt_misc, cgroup2, configfs, debugfs, devpts, devtmpfs, fusectl, hugetlbfs, mqueue, nsfs, overlay, proc, procfs, pstore, rpc_pipefs, securityfs, squashfs, sysfs, tmpfs, tracefs], match_type: strict}
+      network: {}
+  docker_stats:
+    endpoint: unix:///var/run/docker.sock
+    collection_interval: 15s
+    api_version: "1.44"
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 200
+  batch: {}
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: true               # service.name, container.name, ... become labels
+    add_metric_suffixes: false    # keep names as instrumented: sem7_llm_tokens, not sem7_llm_tokens_total
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/tempo]
+    metrics:
+      receivers: [otlp, hostmetrics, docker_stats]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]

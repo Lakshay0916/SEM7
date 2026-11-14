@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import difflib
 import json
+import os
+from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
@@ -159,6 +161,17 @@ def _blackboard(board: list[dict]) -> None:
                      for e in board], expanded=False)
 
 
+def grafana_trace_url(root: dict) -> str | None:
+    """Grafana Explore on this attempt's OpenTelemetry trace, when monitoring runs (GRAFANA_URL set)."""
+    base, trace_id = os.getenv("GRAFANA_URL"), (root.get("attributes") or {}).get("otel_trace_id")
+    if not (base and trace_id):
+        return None
+    pane = {"t": {"datasource": "tempo", "range": {"from": "now-7d", "to": "now"},
+                  "queries": [{"refId": "A", "datasource": {"type": "tempo", "uid": "tempo"},
+                               "queryType": "traceql", "query": trace_id}]}}
+    return f"{base.rstrip('/')}/explore?schemaVersion=1&orgId=1&panes={quote(json.dumps(pane))}"
+
+
 def _trace(wf_id: str, attempt: int, spans: list[dict]) -> None:
     """The attempt's trace: every agent run, LLM call, tool call, A2A hop and guardrail check, in time."""
     df = span_table(spans)
@@ -171,6 +184,9 @@ def _trace(wf_id: str, attempt: int, spans: list[dict]) -> None:
                    "agent service's own spans. ✚ marks a failed span. Hover a bar for tokens, model and details.")
         st.altair_chart(waterfall(df), width="stretch")
         c1, c2 = st.columns([3, 1])
+        link = grafana_trace_url(next((s for s in spans if s["kind"] == "attempt"), {}))
+        if link:
+            c1.link_button("Open this trace in Grafana (OpenTelemetry · Tempo)", link)
         with c1.popover("Table view"):
             st.dataframe(df[["label", "kind", "framework", "start_s", "seconds", "tokens", "model", "status",
                              "detail"]], hide_index=True, width="stretch")

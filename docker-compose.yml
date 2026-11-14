@@ -5,10 +5,16 @@
 #   docker compose --profile tools run --rm tests     test suite in the API image (store tests also on Postgres)
 #   docker compose --profile tools run --rm cli python scripts/run_ci.py --scenario failed_first_repair --heal --approve
 #   docker compose --profile agents up -d --build     + the A2A agent services (ADK + CrewAI; needs a Gemini key in .env)
+#   docker compose --profile monitoring up -d         + OpenTelemetry Collector, Tempo, Prometheus, Grafana (:3000)
+#                                                       (set OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 in .env)
 #   docker compose down            (add -v to also delete the database and workspaces)
 
 x-db-env: &db-url
   DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-sem7}:${POSTGRES_PASSWORD:-sem7dev}@db:5432/${POSTGRES_DB:-sem7}
+  # OpenTelemetry: off unless the endpoint is set (profile "monitoring" runs the Collector)
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  OTEL_SEMCONV_STABILITY_OPT_IN: http   # current HTTP metric names (http.server.request.duration)
+  SEM7_ENV: ${SEM7_ENV:-local}
 
 services:
   db:
@@ -55,6 +61,7 @@ services:
     image: sem7-ui:latest
     environment:
       SEM7_API_URL: http://api:8000
+      GRAFANA_URL: ${GRAFANA_URL:-}   # "open this trace in Grafana" links, when monitoring runs
     ports:
       - "${UI_PORT:-8502}:8502"
     depends_on:
@@ -126,6 +133,64 @@ services:
       db:
         condition: service_healthy
 
+  # ---- Monitoring (optional): docker compose --profile monitoring up -d
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.115.1
+    profiles: ["monitoring"]
+    command: ["--config=/etc/otelcol/config.yaml"]
+    user: "0:0"                    # reads the Docker socket for per-container stats
+    volumes:
+      - ./monitoring/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+      - /:/hostfs:ro                # host metrics (CPU, memory, disk, network)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    mem_limit: 256m
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    profiles: ["monitoring"]
+    command: ["-config.file=/etc/tempo.yaml"]
+    user: "0:0"                    # writes its blocks to the named volume
+    volumes:
+      - ./monitoring/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo:/var/tempo
+    mem_limit: 512m
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    profiles: ["monitoring"]
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=7d",
+              "--web.enable-remote-write-receiver", "--enable-feature=exemplar-storage"]
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus:/prometheus
+    mem_limit: 512m
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    profiles: ["monitoring"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"      # on EC2 the Caddy login is the gate in front of Grafana
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Editor     # editors can use Explore (trace search)
+      GF_SERVER_ROOT_URL: ${GRAFANA_URL:-http://localhost:3000}
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/sem7-agents.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    depends_on: [prometheus, tempo]
+    mem_limit: 256m
+    restart: unless-stopped
+
 volumes:
   pgdata:
   workspace:
+  tempo:
+  prometheus:
+  grafana:

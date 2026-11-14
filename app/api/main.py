@@ -28,6 +28,7 @@ from app.orchestration.pipeline import run_ci_workflow
 from app.orchestration.state import InvalidTransition
 from app.orchestration.store import Store
 from app.risk.predictor import MODEL_PATH, RiskPredictor
+from app.observability import otel
 from app.observability.monitoring import monitoring
 from app.observability.tracing import to_otlp
 from app.security.input_guard import check_text
@@ -41,6 +42,7 @@ app = FastAPI(
     version="1.0.0",
     description="Risk-aware CI pipeline with a human-approved self-healing loop.",
 )
+otel.setup("sem7-api", app=app)  # OpenTelemetry traces / metrics / logs, when OTEL_EXPORTER_OTLP_ENDPOINT is set
 
 
 # --------------------------------------------------------------------------- dependencies

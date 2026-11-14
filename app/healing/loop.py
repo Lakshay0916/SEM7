@@ -28,6 +28,7 @@ from app.models.schemas import (
     TestReport,
 )
 from app.models.schemas import WorkflowState as S
+from app.observability import metrics
 from app.orchestration.store import Store
 from app.reporting.markdown import render_pr_body
 
@@ -106,12 +107,12 @@ def propose_fix(store: Store, wf_id: str, strategy: RepairStrategy) -> RepairPla
     plan = strategy.plan(ctx, inv, rc)
     _log_agent_steps(store, wf_id, strategy)
     if plan is None:
-        store.transition(wf_id, S.ABORTED, "No applicable repair - handing over to a human", agent=agent)
+        abort(store, wf_id, "No applicable repair - handing over to a human", agent=agent)
         return None
     try:
         validate_plan(ctx.repo_dir, plan)
     except UnsafePlanError as exc:
-        store.transition(wf_id, S.ABORTED, f"Proposed plan rejected by safety checks: {exc}", agent="safety")
+        abort(store, wf_id, f"Proposed plan rejected by safety checks: {exc}", agent="safety")
         return None
     store.save_artifact(wf_id, "repair_plan", plan, attempt=plan.attempt)
     store.transition(wf_id, S.SOLUTION_PROPOSED, f"Plan (attempt {plan.attempt}, {plan.level}): {plan.summary}",
@@ -134,6 +135,14 @@ def decide(store: Store, wf_id: str, approved: bool, reviewer: str, comment: str
 
 def abort(store: Store, wf_id: str, reason: str, agent: str = "human") -> None:
     store.transition(wf_id, S.ABORTED, reason, agent=agent)
+    _record_outcome(store, wf_id, "aborted")
+
+
+def _record_outcome(store: Store, wf_id: str, outcome: str) -> None:
+    """Workflow outcome metric (OpenTelemetry): how it ended, after how many attempts, with which strategy."""
+    choice = store.latest(wf_id, "strategy_choice") or {}
+    metrics.record_workflow(outcome, len(store.artifacts(wf_id, "repair_plan")), choice.get("strategy"),
+                            choice.get("pattern"), store.get_workflow(wf_id).get("scenario"))
 
 
 def apply_and_verify(
@@ -184,6 +193,7 @@ def apply_and_verify(
         store.save_artifact(wf_id, "pull_request", pr, attempt=plan.attempt)
         store.transition(wf_id, S.PR_CREATED, f"PR opened ({pr.provider}): {branch} → {pr.base_branch} "
                          "(not merged)", agent="pr")
+        _record_outcome(store, wf_id, "pr_created")
         return S.PR_CREATED
 
     # ---- reflection

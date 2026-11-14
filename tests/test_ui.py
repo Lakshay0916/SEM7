@@ -176,3 +176,17 @@ def test_workflow_view_shows_the_attempt_trace():
     at = _page("ui.views.workflows").run()
     assert not at.exception, at.exception
     assert any(e.label.startswith("🧵 Trace") for e in at.expander)
+
+
+def test_trace_links_to_grafana_only_when_monitoring_runs(monkeypatch):
+    from urllib.parse import unquote
+
+    from ui.workflow_view import grafana_trace_url
+
+    root = {"kind": "attempt", "attributes": {"otel_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"}}
+    monkeypatch.delenv("GRAFANA_URL", raising=False)
+    assert grafana_trace_url(root) is None
+    monkeypatch.setenv("GRAFANA_URL", "https://grafana.example.sslip.io/")
+    url = grafana_trace_url(root)
+    assert url.startswith("https://grafana.example.sslip.io/explore?") and "4bf92f3577b34da6a3ce929d0e0e4736" in unquote(url)
+    assert grafana_trace_url({"kind": "attempt", "attributes": {}}) is None

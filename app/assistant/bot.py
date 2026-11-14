@@ -21,6 +21,7 @@ from app.assistant.knowledge import Hit, KnowledgeBase
 from app.assistant.live import render_digest, render_snapshot, snapshot, workflow_digest
 from app.config import Settings, settings as default_settings
 from app.orchestration.store import Store
+from app.observability import metrics
 from app.security.input_guard import check_text, refusal
 
 log = logging.getLogger(__name__)
@@ -117,6 +118,7 @@ class Assistant:
     def reply(self, message: str, history: list[dict] | None = None, workflow_id: str | None = None) -> ChatReply:
         message = message.strip()
         verdict = check_text(message, "chat")
+        metrics.record_guardrail("chat", verdict.action)
         if verdict.action == "block":
             log.warning("assistant: message blocked by the input guardrail: %s", verdict.summary)
             return ChatReply(refusal(verdict), "guardrail", workflow_id=workflow_id, guardrail="block",

@@ -14,6 +14,9 @@ services:
   ui:
     ports: !reset []
 
+  grafana:
+    ports: !reset []               # only through Caddy: https://grafana.{SITE_HOST}
+
   caddy:
     image: caddy:2-alpine
     environment:

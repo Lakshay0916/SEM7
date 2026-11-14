@@ -13,4 +13,11 @@ sqlalchemy>=2.0
 psycopg[binary]>=3.2
 a2a-sdk[http-server]>=1.2,<2   # A2A client: talks to the agent services (AGENT_TRANSPORT=a2a)
 google-genai>=2.30,<3   # project assistant (only used when LLM_PROVIDER=gemini)
+# OpenTelemetry: traces, metrics and logs over OTLP (only active when OTEL_EXPORTER_OTLP_ENDPOINT is set)
+opentelemetry-sdk>=1.42,<2
+opentelemetry-exporter-otlp-proto-http>=1.42,<2
+opentelemetry-instrumentation-fastapi>=0.63b1
+opentelemetry-instrumentation-sqlalchemy>=0.63b1
+opentelemetry-instrumentation-httpx>=0.63b1
+opentelemetry-instrumentation-logging>=0.63b1
 httpx>=0.27          # FastAPI TestClient in tests

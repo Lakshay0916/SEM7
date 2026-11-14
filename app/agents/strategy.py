@@ -35,7 +35,7 @@ from app.config import settings
 from app.healing.rules import RuleBasedStrategy
 from app.healing.strategy import RepairContext
 from app.models.schemas import InvestigationReport, RepairPlan, RootCauseReport
-from app.observability import tracing
+from app.observability import metrics, otel, tracing
 from app.security.input_guard import InputBlocked, Verdict, check_text, spotlight
 
 Analysts = Callable[[str, list[AgentRecord]], tuple[InvestigationReport, RootCauseReport]]
@@ -275,6 +275,7 @@ class AgenticStrategy:
             verdict = check_text(evidence, "evidence")
             if gs is not None:
                 gs.attributes.update(verdict=verdict.action, findings=verdict.summary[:200])
+        metrics.record_guardrail("evidence", verdict.action)
         status = {"allow": "ok", "flag": "flagged", "block": "blocked"}[verdict.action]
         self.records.append(AgentRecord(agent="input guardrail", framework="system", status=status,
                                         message=f"{verdict.action}: {verdict.summary}"[:400]))
@@ -299,7 +300,12 @@ class AgenticStrategy:
             trace, root = self.traces.pop(ctx.attempt, (None, None))
             if trace is not None:
                 root.end = time.time()
-                self.finished.append((ctx.attempt, trace.drain()))
+                spans = trace.drain()
+                otel_trace_id = otel.export_trace(spans)  # the same trace in OpenTelemetry (Tempo / Grafana)
+                if otel_trace_id:
+                    next(s for s in spans if s["kind"] == "attempt")["attributes"]["otel_trace_id"] = otel_trace_id
+                metrics.record_attempt(spans)
+                self.finished.append((ctx.attempt, spans))
 
     def _investigate(self, ctx: RepairContext) -> InvestigationReport:
         evidence, verdict = self._screen(ctx, build_evidence(ctx))

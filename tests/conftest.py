@@ -1,7 +1,13 @@
+import os
 import sys
 from pathlib import Path
 
 import pytest
+
+# Tests are hermetic: whatever a developer's .env says, no test calls a real LLM or exports telemetry.
+# (Set before app.config loads .env - an existing environment variable wins over .env.)
+os.environ["LLM_PROVIDER"] = "heuristic"
+os.environ.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 

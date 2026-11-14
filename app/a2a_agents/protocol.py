@@ -35,7 +35,7 @@ from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill, SendMessageRequest, TaskState
 
-from app.observability import tracing
+from app.observability import otel, tracing
 
 Skill = Callable[[dict], dict]  # payload -> {"result": ..., "records": [...]}
 
@@ -105,8 +105,11 @@ def build_app(card: AgentCard, skills: dict[str, Skill]):
     async def health(_):
         return JSONResponse({"status": "ok", "agent": card.name, "skills": list(skills)})
 
-    return Starlette(routes=[*create_agent_card_routes(card), *create_jsonrpc_routes(handler, rpc_url="/"),
-                             Route("/health", health)])
+    app = Starlette(routes=[*create_agent_card_routes(card), *create_jsonrpc_routes(handler, rpc_url="/"),
+                            Route("/health", health)])
+    if otel.setup(card.name):  # server spans joined to the caller's trace (W3C trace context from httpx)
+        otel.instrument_app(app)
+    return app
 
 
 def public_url(default_port: int) -> str:

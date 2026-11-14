@@ -21,8 +21,7 @@ from app.models.schemas import WorkflowState as S
 from app.orchestration.pipeline import run_ci_workflow
 from app.orchestration.store import Store
 
-# Gemini 3.1 Flash-Lite list price, standard tier, USD per million tokens (ai.google.dev, October 2026)
-PRICE_PER_MTOK = {"input": 0.25, "output": 1.50}
+from app.observability.metrics import PRICE_PER_MTOK  # noqa: E402 - one price table for metrics and evaluation
 # The function each scenario's commit broke, to check the root cause names it
 EXPECTED_FUNCTION = {"simple_bug": "add", "failed_first_repair": "divide", "injected_commit": "add"}
 DAILY_QUOTA = re.compile(r"per ?day|PerDay|requests_per_day", re.I)
