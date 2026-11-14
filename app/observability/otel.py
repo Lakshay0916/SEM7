@@ -83,15 +83,17 @@ def setup(service: str, app=None) -> bool:
 
 
 def instrument_app(app) -> None:
-    """Server spans for a FastAPI app (the API) or any ASGI app (the A2A agent services)."""
+    """Server spans for a FastAPI app (the API) or any ASGI app (the A2A agent services).
+
+    The per-message "http send / http receive" spans of the ASGI layer are left out: noise, no insight."""
     if getattr(app, "router", None) is not None and hasattr(app, "openapi"):
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-        FastAPIInstrumentor.instrument_app(app, excluded_urls="health")
+        FastAPIInstrumentor.instrument_app(app, excluded_urls="health", exclude_spans=["receive", "send"])
     else:
         from opentelemetry.instrumentation.asgi import OpenTelemetryMiddleware
 
-        app.add_middleware(OpenTelemetryMiddleware, excluded_urls="health")
+        app.add_middleware(OpenTelemetryMiddleware, excluded_urls="health", exclude_spans=["receive", "send"])
 
 
 # --------------------------------------------------------------------------- agent traces -> OTel spans

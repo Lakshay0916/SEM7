@@ -308,8 +308,8 @@
   },
   {
    "type": "timeseries",
-   "title": "Agent run time, p95 by agent",
-   "description": "Seconds per agent run (from the ADK / CrewAI callbacks).",
+   "title": "Agent run time, p95 by agent (since the service started)",
+   "description": "Seconds per agent run (from the ADK / CrewAI callbacks). Over every run since the service started, so it shows even when runs are occasional.",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
@@ -317,7 +317,7 @@
    "targets": [
     {
      "refId": "A",
-     "expr": "histogram_quantile(0.95, sum by (le, agent) (rate(sem7_agent_duration_bucket[15m])))",
+     "expr": "histogram_quantile(0.95, sum by (le, agent) (sem7_agent_duration_bucket))",
      "legendFormat": "{{agent}}"
     }
    ],
@@ -460,7 +460,7 @@
   },
   {
    "type": "timeseries",
-   "title": "A2A hop latency, p95",
+   "title": "A2A hop latency, p95 (since the service started)",
    "description": "",
    "datasource": {
     "type": "prometheus",
@@ -469,7 +469,7 @@
    "targets": [
     {
      "refId": "A",
-     "expr": "histogram_quantile(0.95, sum by (le, service, skill) (rate(sem7_a2a_duration_bucket[15m])))",
+     "expr": "histogram_quantile(0.95, sum by (le, service, skill) (sem7_a2a_duration_bucket))",
      "legendFormat": "{{service}}/{{skill}}"
     }
    ],

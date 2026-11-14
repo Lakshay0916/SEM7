@@ -109,14 +109,15 @@ def agents() -> Board:
     b.row("Per agent")
     b.bars("Tokens by agent", "sum by (agent) (sem7_llm_tokens)", "{{agent}}")
     b.bars("Cost by agent (USD)", "sum by (agent) (sem7_llm_cost)", "{{agent}}", "currencyUSD", decimals=4)
-    b.series("Agent run time, p95 by agent",
-             [("histogram_quantile(0.95, sum by (le, agent) (rate(sem7_agent_duration_bucket[15m])))", "{{agent}}")],
-             "s", "Seconds per agent run (from the ADK / CrewAI callbacks).")
+    b.series("Agent run time, p95 by agent (" + SINCE + ")",
+             [("histogram_quantile(0.95, sum by (le, agent) (sem7_agent_duration_bucket))", "{{agent}}")],
+             "s", "Seconds per agent run (from the ADK / CrewAI callbacks). Over every run since the service "
+                  "started, so it shows even when runs are occasional.")
     b.series("LLM calls per minute by agent", [("60 * sum by (agent) (rate(sem7_llm_calls[5m]))", "{{agent}}")])
     b.row("Tools and agent-to-agent")
     b.bars("MCP tool calls", "sum by (tool, status) (sem7_tool_calls)", "{{tool}} · {{status}}")
-    b.series("A2A hop latency, p95",
-             [("histogram_quantile(0.95, sum by (le, service, skill) (rate(sem7_a2a_duration_bucket[15m])))",
+    b.series("A2A hop latency, p95 (" + SINCE + ")",
+             [("histogram_quantile(0.95, sum by (le, service, skill) (sem7_a2a_duration_bucket))",
                "{{service}}/{{skill}}")], "s")
     b.row("Traces")
     b.traces("Latest agent attempts (click a trace for the full waterfall)", '{name=~"repair attempt.*"}',
