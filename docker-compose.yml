@@ -134,6 +134,7 @@ services:
         condition: service_healthy
 
   # ---- Monitoring (optional): docker compose --profile monitoring up -d
+  # Memory limits sized to fit next to the app on a 2 GB t3.small (with swap): ~830 MB at most.
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.115.1
     profiles: ["monitoring"]
@@ -143,7 +144,7 @@ services:
       - ./monitoring/otel-collector.yaml:/etc/otelcol/config.yaml:ro
       - /:/hostfs:ro                # host metrics (CPU, memory, disk, network)
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    mem_limit: 256m
+    mem_limit: 128m
     restart: unless-stopped
 
   tempo:
@@ -154,7 +155,7 @@ services:
     volumes:
       - ./monitoring/tempo.yaml:/etc/tempo.yaml:ro
       - tempo:/var/tempo
-    mem_limit: 512m
+    mem_limit: 256m
     restart: unless-stopped
 
   prometheus:
@@ -165,7 +166,7 @@ services:
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus:/prometheus
-    mem_limit: 512m
+    mem_limit: 256m
     restart: unless-stopped
 
   grafana:
@@ -185,7 +186,7 @@ services:
     ports:
       - "${GRAFANA_PORT:-3000}:3000"
     depends_on: [prometheus, tempo]
-    mem_limit: 256m
+    mem_limit: 192m
     restart: unless-stopped
 
 volumes:

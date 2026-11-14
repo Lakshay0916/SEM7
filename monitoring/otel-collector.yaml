@@ -34,7 +34,7 @@ receivers:
 processors:
   memory_limiter:
     check_interval: 1s
-    limit_mib: 200
+    limit_mib: 100
   batch: {}
 
 exporters:
