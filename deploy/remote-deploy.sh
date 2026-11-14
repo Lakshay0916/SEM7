@@ -17,6 +17,15 @@ AGENTS="${AGENTS:-keep}"
 MONITORING="${MONITORING:-1}"
 : "${SITE_HOST:?SITE_HOST is required}"
 
+first_login() {  # a newly created login: shown once - but never into CI logs, where it goes to a server-only file
+  if [[ -n "${CI:-}" ]]; then
+    (umask 077; echo "$1: user=admin password=$2" >> ~/sem7-first-logins.txt)
+    echo "$1 created: saved on the server in ~/sem7-first-logins.txt (not printed in CI logs)"
+  else
+    echo "$1 (shown once): user=admin password=$2"
+  fi
+}
+
 mkdir -p ~/sem7 && cd ~/sem7
 # Replace the code, keep server-only secrets.
 find . -mindepth 1 -maxdepth 1 ! -name .env ! -name .gemini-key ! -name deploy -exec rm -rf {} +
@@ -38,7 +47,7 @@ if [[ ! -f deploy/auth.caddy ]]; then
   PASS="$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-16)"
   HASH="$(docker run --rm caddy:2-alpine caddy hash-password --plaintext "$PASS")"
   printf 'basic_auth {\n\tadmin %s\n}\n' "$HASH" > deploy/auth.caddy
-  echo "WEB LOGIN (shown once): user=admin password=$PASS"
+  first_login "WEB LOGIN" "$PASS"
 fi
 
 set_env() {  # set_env KEY VALUE - replace or add one line of .env
@@ -67,7 +76,7 @@ if [[ "$MONITORING" != "0" ]]; then
   if ! grep -q '^GRAFANA_ADMIN_PASSWORD=.' .env; then
     GPASS="$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-16)"
     set_env GRAFANA_ADMIN_PASSWORD "$GPASS"
-    echo "GRAFANA ADMIN (shown once): user=admin password=$GPASS"
+    first_login "GRAFANA ADMIN" "$GPASS"
   fi
 else
   sed -i '/^OTEL_EXPORTER_OTLP_ENDPOINT=/d; /^GRAFANA_URL=/d' .env

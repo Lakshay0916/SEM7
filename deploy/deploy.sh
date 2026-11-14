@@ -46,7 +46,7 @@ fi
 # Same server-side steps as the CD workflow: deploy/remote-deploy.sh, copied over and run as a file with
 # stdin closed (a script piped in on stdin can be swallowed by a command inside it that reads stdin).
 scp -i "$KEY" -q "$ROOT/deploy/remote-deploy.sh" "ubuntu@$IP:/tmp/sem7-remote-deploy.sh"
-"${SSH[@]}" SITE_HOST="$SITE_HOST" AGENTS="$AGENTS" MONITORING="${DEPLOY_MONITORING:-1}" \
+"${SSH[@]}" SITE_HOST="$SITE_HOST" AGENTS="$AGENTS" MONITORING="${DEPLOY_MONITORING:-1}" CI="${CI:-}" \
   RELEASE=/tmp/sem7.tar.gz bash /tmp/sem7-remote-deploy.sh < /dev/null
 
 echo "smoke test ..."

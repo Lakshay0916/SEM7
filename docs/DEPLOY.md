@@ -67,6 +67,22 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f api
 Containers use `restart: unless-stopped`, so the stack comes back after a reboot.
 If your home IP changes, re-run `deploy/provision.sh` to allow SSH from the new address.
 
+## Continuous deployment (GitHub Actions)
+
+*Actions → Deploy to AWS EC2 → Run workflow* deploys the chosen branch: CI (all jobs) → start the server → open SSH
+for the runner's IP only → `deploy/deploy.sh` → `deploy/healthcheck.sh` → remove the SSH rule → stop the server
+(unless *keep running* is ticked). The SSH rule removal and the stop run even when a step fails.
+
+Repository secrets: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (the `sem7-deployer` user: EC2 start/stop and
+security-group rules only) and `EC2_SSH_KEY` (a deploy key made for GitHub; its public half is in the server's
+`~/.ssh/authorized_keys`). The server keeps its own `.env`, so no application secret is sent from GitHub.
+
+## Monitoring
+
+Grafana: `https://grafana.<host>` (same Caddy login; Grafana's own admin password is created on the first deploy).
+Dashboards: *SEM7 · Agents & LLM*, *SEM7 · Service & workflows*, *SEM7 · Infrastructure*; traces in Explore → Tempo.
+`DEPLOY_MONITORING=0 deploy/deploy.sh <ip>` deploys without the monitoring stack (about 180 MB of memory).
+
 ## Cost (ap-south-1, approximate)
 
 | Item | Cost |

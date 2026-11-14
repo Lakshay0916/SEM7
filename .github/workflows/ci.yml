@@ -5,12 +5,13 @@ on:
     branches: ["**"]
   pull_request:
   workflow_dispatch:
+  workflow_call:   # the Deploy workflow runs the whole CI first and only deploys if it passes
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}   # a deploy's CI never cancels (or is cancelled by) push CI
   cancel-in-progress: true
 
 jobs:

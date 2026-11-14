@@ -236,6 +236,19 @@ It is read-only: it never runs pipelines, approves fixes or changes code.
 The same compose stack runs on one EC2 instance behind Caddy (HTTPS + login), created with plain AWS CLI scripts in `deploy/`:
 `deploy/provision.sh` → `deploy/deploy.sh <ip>` → `deploy/teardown.sh`. Full guide: [docs/DEPLOY.md](docs/DEPLOY.md).
 
+- **Continuous deployment - the "Deploy" button:** *Actions → Deploy to AWS EC2 → Run workflow*
+  (`.github/workflows/deploy.yml`). The whole CI runs first; only if it passes is the server started, SSH opened for
+  the runner's IP alone, the commit deployed with the same `deploy/remote-deploy.sh` a laptop deploy uses, the stack
+  health-checked (`deploy/healthcheck.sh`), the SSH rule removed and the server stopped again (tick *keep running*
+  to leave it up). Secrets: `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (the EC2-only `sem7-deployer` user) and
+  `EC2_SSH_KEY` (a dedicated deploy key). Logins created during a CI deploy are saved on the server, never logged.
+- **OpenTelemetry + monitoring (compose profile `monitoring`, on by default on EC2):** the API and both agent services
+  export traces, metrics and trace-linked logs over OTLP (`app/observability/otel.py`, `metrics.py`) to an
+  **OpenTelemetry Collector**, which also collects host and container metrics, then **Tempo** (traces, service map)
+  and **Prometheus** (metrics) feed **Grafana** at `https://grafana.<host>` with three dashboards
+  (`monitoring/grafana/build_dashboards.py`): Agents & LLM, Service & workflows, Infrastructure. One agent run is one
+  trace across all three containers; each attempt in the UI links to its trace in Grafana.
+
 ## Self-healing loop
 
 ```

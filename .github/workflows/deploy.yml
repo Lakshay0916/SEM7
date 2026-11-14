@@ -1,0 +1,122 @@
+name: Deploy to AWS EC2
+
+# The "Deploy" button: Actions → Deploy to AWS EC2 → Run workflow (choose the branch to deploy).
+#
+#   1. CI must pass (the whole CI workflow runs first)
+#   2. start the EC2 server
+#   3. open SSH for this runner's IP only (it is removed again at the end, even if the deploy fails)
+#   4. deploy the commit with deploy/deploy.sh (the same script used from a laptop)
+#   5. health check on the server (deploy/healthcheck.sh)
+#   6. stop the server again, unless "keep running" was ticked
+#
+# Secrets (Settings → Secrets and variables → Actions):
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY   IAM user limited to this EC2 instance's start/stop/firewall
+#   EC2_SSH_KEY                                a dedicated deploy key (its public half is on the server)
+# The server keeps its own .env (database password, Gemini keys); nothing secret is sent from here.
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep_running:
+        description: "Keep the server running after the deploy (otherwise it is stopped to save cost)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-south-1
+  INSTANCE_ID: i-0361d6c2d38b80685
+  SECURITY_GROUP: sg-0972a20b99681334e
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: Deploy to EC2
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: production
+      url: ${{ steps.server.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Start the server
+        id: server
+        run: |
+          aws ec2 start-instances --instance-ids "$INSTANCE_ID" >/dev/null
+          aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+          ip=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+          echo "ip=$ip" >> "$GITHUB_OUTPUT"
+          echo "url=https://${ip//./-}.sslip.io" >> "$GITHUB_OUTPUT"
+          echo "grafana=https://grafana.${ip//./-}.sslip.io" >> "$GITHUB_OUTPUT"
+          echo "server $INSTANCE_ID running at $ip"
+
+      - name: Open SSH for this runner only
+        id: firewall
+        run: |
+          cidr="$(curl -fsS https://checkip.amazonaws.com)/32"
+          aws ec2 authorize-security-group-ingress --group-id "$SECURITY_GROUP" --ip-permissions \
+            "IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=$cidr,Description=github-actions-run-${{ github.run_id }}}]" \
+            >/dev/null
+          echo "cidr=$cidr" >> "$GITHUB_OUTPUT"
+          echo "SSH open for $cidr until this job ends"
+
+      - name: Deploy key
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/sem7_deploy
+          chmod 600 ~/.ssh/sem7_deploy
+
+      - name: Deploy ${{ github.sha }}
+        run: deploy/deploy.sh "${{ steps.server.outputs.ip }}" ~/.ssh/sem7_deploy
+
+      - name: Health check
+        run: |
+          key=~/.ssh/sem7_deploy; ip="${{ steps.server.outputs.ip }}"
+          scp -i "$key" -q deploy/healthcheck.sh "ubuntu@$ip:/tmp/sem7-healthcheck.sh"
+          ssh -i "$key" "ubuntu@$ip" bash /tmp/sem7-healthcheck.sh < /dev/null | tee health.txt
+
+      - name: Close SSH again
+        if: always() && steps.firewall.outputs.cidr != ''
+        run: |
+          aws ec2 revoke-security-group-ingress --group-id "$SECURITY_GROUP" --ip-permissions \
+            "IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=${{ steps.firewall.outputs.cidr }}}]" >/dev/null
+          echo "SSH rule for ${{ steps.firewall.outputs.cidr }} removed"
+
+      - name: Stop the server
+        if: always() && !inputs.keep_running && steps.server.outputs.ip != ''
+        run: |
+          aws ec2 stop-instances --instance-ids "$INSTANCE_ID" >/dev/null
+          aws ec2 wait instance-stopped --instance-ids "$INSTANCE_ID"
+          echo "server stopped"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Deploy ${{ job.status }}"
+            echo "- Commit: \`${{ github.sha }}\` on \`${{ github.ref_name }}\`"
+            echo "- Site: ${{ steps.server.outputs.url }} · Grafana: ${{ steps.server.outputs.grafana }}"
+            echo "- Server left ${{ inputs.keep_running && 'running' || 'stopped' }}"
+            if [ -f health.txt ]; then echo; echo '```'; cat health.txt; echo '```'; fi
+          } >> "$GITHUB_STEP_SUMMARY"
