@@ -19,8 +19,7 @@ MONITORING="${MONITORING:-1}"
 
 mkdir -p ~/sem7 && cd ~/sem7
 # Replace the code, keep server-only secrets.
-find . -mindepth 1 -maxdepth 1 ! -name .env ! -name .gemini-key ! -name .config-hashes ! -name deploy \
-  -exec rm -rf {} +
+find . -mindepth 1 -maxdepth 1 ! -name .env ! -name .gemini-key ! -name deploy -exec rm -rf {} +
 find deploy -mindepth 1 ! -name auth.caddy -delete 2>/dev/null || true
 tar -xzf "$RELEASE" && rm -f "$RELEASE"
 
@@ -80,18 +79,12 @@ echo "compose profiles: ${PROFILES[*]:-none}"
 COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.prod.yml)
 "${COMPOSE[@]}" up -d --build --wait --remove-orphans
 
-# Containers bind-mount their config files; a new release replaces those files, but a running container keeps
-# the old copy. Restart exactly the services whose config changed since the last release.
-declare -A CONFIG=([caddy]="deploy/Caddyfile" [otel-collector]="monitoring/otel-collector.yaml"
-                   [tempo]="monitoring/tempo.yaml" [prometheus]="monitoring/prometheus.yml" [grafana]="monitoring/grafana")
-touch .config-hashes
-for svc in "${!CONFIG[@]}"; do
-  sum="$(find ${CONFIG[$svc]} -type f -print0 2>/dev/null | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)"
-  if ! grep -qx "$svc $sum" .config-hashes; then
-    if "${COMPOSE[@]}" ps --services --status running | grep -qx "$svc"; then
-      "${COMPOSE[@]}" restart "$svc" >/dev/null && echo "restarted $svc (config changed)"
-    fi
-    sed -i "/^$svc /d" .config-hashes && echo "$svc $sum" >> .config-hashes
+# Caddy and the monitoring services bind-mount config files and folders. A release deletes and re-creates
+# them, and a running container keeps pointing at the deleted copy (a re-created folder is empty for it),
+# so they are restarted on every release - a few seconds, and always the current config.
+for svc in caddy otel-collector tempo prometheus grafana; do
+  if "${COMPOSE[@]}" ps --services --status running | grep -qx "$svc"; then
+    "${COMPOSE[@]}" restart "$svc" >/dev/null && echo "restarted $svc (fresh config)"
   fi
 done
 docker image prune -f >/dev/null
