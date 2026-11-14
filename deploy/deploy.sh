@@ -43,9 +43,11 @@ if [[ "${DEPLOY_AGENTS:-1}" == "1" && -n "$GEMINI_KEY" ]]; then
   printf '%s' "$GEMINI_KEY" | "${SSH[@]}" 'umask 077; mkdir -p ~/sem7; cat > ~/sem7/.gemini-key'
 fi
 
-# Same server-side steps as the CD workflow: deploy/remote-deploy.sh (sent over SSH stdin).
+# Same server-side steps as the CD workflow: deploy/remote-deploy.sh, copied over and run as a file with
+# stdin closed (a script piped in on stdin can be swallowed by a command inside it that reads stdin).
+scp -i "$KEY" -q "$ROOT/deploy/remote-deploy.sh" "ubuntu@$IP:/tmp/sem7-remote-deploy.sh"
 "${SSH[@]}" SITE_HOST="$SITE_HOST" AGENTS="$AGENTS" MONITORING="${DEPLOY_MONITORING:-1}" \
-  RELEASE=/tmp/sem7.tar.gz bash -s < "$ROOT/deploy/remote-deploy.sh"
+  RELEASE=/tmp/sem7.tar.gz bash /tmp/sem7-remote-deploy.sh < /dev/null
 
 echo "smoke test ..."
 for _ in $(seq 30); do
